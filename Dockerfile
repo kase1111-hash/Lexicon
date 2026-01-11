@@ -2,7 +2,7 @@
 # Multi-stage build for optimized image size
 
 # Build stage
-FROM python:3.11-slim as builder
+FROM python:3.14-slim as builder
 
 WORKDIR /build
 
@@ -17,7 +17,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Production stage
-FROM python:3.11-slim as production
+FROM python:3.14-slim as production
 
 WORKDIR /app
 
