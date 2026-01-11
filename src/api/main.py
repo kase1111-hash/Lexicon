@@ -24,6 +24,7 @@ from src.exceptions import (
     ValidationError,
 )
 from src.utils.db import close_db, get_db
+from src.utils.error_tracking import SentryIntegration, capture_error, init_error_tracking
 from src.utils.logging import get_logger, setup_logging
 
 from .middleware import PerformanceLoggingMiddleware, RequestLoggingMiddleware
@@ -41,6 +42,9 @@ setup_logging(
     },
 )
 logger = get_logger(__name__)
+
+# Initialize error tracking (Sentry, Elasticsearch)
+init_error_tracking(environment=os.getenv("ENVIRONMENT", "development"))
 
 
 @asynccontextmanager
@@ -237,6 +241,15 @@ async def lexicon_error_handler(request: Request, exc: LexiconError) -> JSONResp
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle uncaught exceptions."""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
+
+    # Capture error with Sentry and other integrations
+    capture_error(
+        exc,
+        path=str(request.url.path),
+        method=request.method,
+        client_ip=request.client.host if request.client else None,
+    )
+
     return JSONResponse(
         status_code=500,
         content={

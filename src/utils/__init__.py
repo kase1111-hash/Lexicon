@@ -16,6 +16,13 @@ from .common import (
 )
 from .db import DatabaseConfig, DatabaseManager, close_db, get_db
 from .embeddings import EmbeddingUtils
+from .error_tracking import (
+    ElasticsearchHandler,
+    ErrorNotifier,
+    SentryIntegration,
+    capture_error,
+    init_error_tracking,
+)
 from .logging import (
     LogContext,
     Timer,
@@ -67,6 +74,12 @@ __all__ = [
     "Timer",
     "log_timing",
     "log_call",
+    # Error tracking
+    "init_error_tracking",
+    "capture_error",
+    "SentryIntegration",
+    "ElasticsearchHandler",
+    "ErrorNotifier",
     # Common utilities
     "generate_content_hash",
     "chunk_list",
