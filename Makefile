@@ -3,7 +3,8 @@
 
 .PHONY: help install install-dev test lint format type-check security-check \
         docker-up docker-down docker-build docker-logs clean pre-commit \
-        build dist publish version-check release-check package-all docker-image
+        build dist publish version-check release-check package-all docker-image \
+        version-bump-patch version-bump-minor version-bump-major
 
 # Default target
 help:
@@ -42,6 +43,12 @@ help:
 	@echo "  make package-all   Build all distributable packages"
 	@echo "  make release-check Run all checks before release"
 	@echo "  make publish       Publish to PyPI (requires credentials)"
+	@echo ""
+	@echo "Versioning:"
+	@echo "  make version-check      Show current version"
+	@echo "  make version-bump-patch Bump patch version (0.1.0 -> 0.1.1)"
+	@echo "  make version-bump-minor Bump minor version (0.1.0 -> 0.2.0)"
+	@echo "  make version-bump-major Bump major version (0.1.0 -> 1.0.0)"
 	@echo ""
 
 # =============================================================================
@@ -167,7 +174,18 @@ dist:
 	python -m build
 
 version-check:
-	@python -c "from src import __version__; print(f'Version: {__version__}')"
+	@echo "VERSION file: $$(cat VERSION)"
+	@echo "pyproject.toml: $$(grep '^version' pyproject.toml | head -1)"
+	@echo "src/__init__.py: $$(python -c "from src import __version__; print(__version__)")"
+
+version-bump-patch:
+	python scripts/bump_version.py patch
+
+version-bump-minor:
+	python scripts/bump_version.py minor
+
+version-bump-major:
+	python scripts/bump_version.py major
 
 release-check: lint type-check security-check test
 	@echo ""
