@@ -1,6 +1,5 @@
 """FastAPI application entry point."""
 
-import logging
 import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -25,15 +24,23 @@ from src.exceptions import (
     ValidationError,
 )
 from src.utils.db import close_db, get_db
+from src.utils.logging import get_logger, setup_logging
 
+from .middleware import PerformanceLoggingMiddleware, RequestLoggingMiddleware
 from .routes import analysis, graph, lsr
 
-# Configure logging
-logging.basicConfig(
+# Configure logging with our custom setup
+setup_logging(
     level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    json_format=os.getenv("LOG_FORMAT", "text").lower() == "json",
+    log_file=os.getenv("LOG_FILE"),
+    component_levels={
+        "src.api": os.getenv("API_LOG_LEVEL", "INFO"),
+        "src.pipelines": os.getenv("PIPELINE_LOG_LEVEL", "INFO"),
+        "src.utils.db": os.getenv("DB_LOG_LEVEL", "WARNING"),
+    },
 )
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -88,6 +95,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Request logging middleware
+app.add_middleware(RequestLoggingMiddleware)
+
+# Performance monitoring middleware (logs slow requests)
+slow_request_threshold = float(os.getenv("SLOW_REQUEST_THRESHOLD_MS", "1000"))
+app.add_middleware(PerformanceLoggingMiddleware, slow_request_threshold_ms=slow_request_threshold)
 
 
 # =============================================================================

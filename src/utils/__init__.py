@@ -16,6 +16,17 @@ from .common import (
 )
 from .db import DatabaseConfig, DatabaseManager, close_db, get_db
 from .embeddings import EmbeddingUtils
+from .logging import (
+    LogContext,
+    Timer,
+    clear_request_id,
+    get_logger,
+    get_request_id,
+    log_call,
+    log_timing,
+    set_request_id,
+    setup_logging,
+)
 from .phonetics import PhoneticUtils
 from .validation import (
     AnachronismRequest,
@@ -46,6 +57,16 @@ __all__ = [
     "EmbeddingUtils",
     # Phonetics
     "PhoneticUtils",
+    # Logging
+    "setup_logging",
+    "get_logger",
+    "set_request_id",
+    "get_request_id",
+    "clear_request_id",
+    "LogContext",
+    "Timer",
+    "log_timing",
+    "log_call",
     # Common utilities
     "generate_content_hash",
     "chunk_list",
