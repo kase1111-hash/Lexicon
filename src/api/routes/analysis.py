@@ -1,68 +1,195 @@
-"""Analysis API routes."""
+"""Analysis API routes for text dating, anachronism detection, and semantic analysis."""
 
-from typing import Optional
+import logging
 
-from fastapi import APIRouter, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query
+
+from src.models import ErrorResponse
+from src.utils.validation import (
+    AnachronismRequest,
+    DateTextRequest,
+    sanitize_iso_code,
+    sanitize_string,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-class TextInput(BaseModel):
-    """Input for text analysis."""
+@router.post(
+    "/date-text",
+    responses={400: {"model": ErrorResponse}},
+)
+async def date_text(request: DateTextRequest) -> dict:
+    """
+    Predict the date range of a text based on vocabulary.
 
-    text: str
-    language: str
+    Analyzes the vocabulary in the text and compares it against
+    historical attestation data to estimate when the text was composed.
 
+    Returns:
+        - predicted_date_range: [start_year, end_year]
+        - confidence: 0.0 to 1.0
+        - diagnostic_vocabulary: words that most influenced the dating
+    """
+    logger.info(f"Dating text in {request.language}, length={len(request.text)}")
 
-class AnachronismInput(BaseModel):
-    """Input for anachronism detection."""
-
-    text: str
-    claimed_date: int
-    language: str
-
-
-@router.post("/date-text")
-async def date_text(input_data: TextInput):
-    """Predict the date range of a text based on vocabulary."""
-    # TODO: Implement text dating
+    # TODO: Implement text dating using vocabulary analysis
     return {
         "predicted_date_range": [0, 0],
         "confidence": 0.0,
         "diagnostic_vocabulary": [],
+        "analysis": {
+            "language": request.language,
+            "text_length": len(request.text),
+            "word_count": len(request.text.split()),
+        },
     }
 
 
-@router.post("/detect-anachronisms")
-async def detect_anachronisms(input_data: AnachronismInput):
-    """Detect anachronistic vocabulary in a text."""
+@router.post(
+    "/detect-anachronisms",
+    responses={400: {"model": ErrorResponse}},
+)
+async def detect_anachronisms(request: AnachronismRequest) -> dict:
+    """
+    Detect anachronistic vocabulary in a text.
+
+    Compares the vocabulary in the text against the claimed date
+    to identify words that were not yet in use at that time.
+
+    Returns:
+        - anachronisms: list of words with earliest attestation dates
+        - verdict: "consistent", "suspicious", or "anachronistic"
+    """
+    logger.info(
+        f"Checking anachronisms for {request.language}, "
+        f"claimed_date={request.claimed_date}, length={len(request.text)}"
+    )
+
     # TODO: Implement anachronism detection
     return {
         "anachronisms": [],
         "verdict": "consistent",
+        "analysis": {
+            "language": request.language,
+            "claimed_date": request.claimed_date,
+            "words_analyzed": len(request.text.split()),
+        },
     }
 
 
-@router.get("/contact-events")
+@router.get(
+    "/contact-events",
+    responses={400: {"model": ErrorResponse}},
+)
 async def get_contact_events(
-    language: str = Query(..., description="ISO language code"),
-    date_start: Optional[int] = Query(None, description="Start of date range"),
-    date_end: Optional[int] = Query(None, description="End of date range"),
-):
-    """Get detected contact events for a language."""
+    language: str = Query(..., description="ISO 639-3 language code", max_length=10),
+    date_start: int | None = Query(None, description="Start year", ge=-10000, le=3000),
+    date_end: int | None = Query(None, description="End year", ge=-10000, le=3000),
+) -> list[dict]:
+    """
+    Get detected language contact events.
+
+    Returns contact events where the specified language was either
+    a donor or recipient of vocabulary.
+
+    Each contact event includes:
+        - donor_language: source of borrowed words
+        - date_range: when the contact occurred
+        - vocabulary_count: number of words transferred
+        - confidence: certainty of the detection
+        - sample_words: example borrowed words
+    """
+    # Sanitize and validate
+    language = sanitize_iso_code(language)
+    if not language:
+        raise HTTPException(status_code=400, detail="Invalid language code")
+
+    if date_start is not None and date_end is not None and date_end < date_start:
+        raise HTTPException(status_code=400, detail="date_end must be >= date_start")
+
+    logger.info(f"Fetching contact events for {language}, dates={date_start}-{date_end}")
+
     # TODO: Implement contact event retrieval
     return []
 
 
-@router.get("/semantic-drift")
+@router.get(
+    "/semantic-drift",
+    responses={400: {"model": ErrorResponse}},
+)
 async def get_semantic_drift(
-    form: str = Query(..., description="Word form to analyze"),
-    language: str = Query(..., description="ISO language code"),
-):
-    """Get semantic drift trajectory for a word."""
+    form: str = Query(..., description="Word form to analyze", max_length=200),
+    language: str = Query(..., description="ISO 639-3 language code", max_length=10),
+) -> dict:
+    """
+    Get semantic drift trajectory for a word.
+
+    Tracks how a word's meaning has changed over time by analyzing
+    its semantic embeddings across different time periods.
+
+    Returns:
+        - trajectory: list of {date, embedding_2d, definition}
+        - shift_events: detected semantic shift events with types
+    """
+    # Sanitize inputs
+    form = sanitize_string(form, max_length=200)
+    language = sanitize_iso_code(language)
+
+    if not form:
+        raise HTTPException(status_code=400, detail="Form is required")
+    if not language:
+        raise HTTPException(status_code=400, detail="Invalid language code")
+
+    logger.info(f"Fetching semantic drift for '{form}' in {language}")
+
     # TODO: Implement semantic drift retrieval
     return {
+        "form": form,
+        "language": language,
         "trajectory": [],
         "shift_events": [],
+    }
+
+
+@router.get(
+    "/compare-concept",
+    responses={400: {"model": ErrorResponse}},
+)
+async def compare_concept(
+    concept: str = Query(..., description="Concept to compare (e.g., 'freedom')", max_length=100),
+    languages: str = Query(..., description="Comma-separated ISO 639-3 codes", max_length=100),
+) -> dict:
+    """
+    Compare how a concept is expressed across languages.
+
+    Analyzes the semantic trajectories of translations/equivalents
+    of a concept across multiple languages.
+
+    Returns:
+        - concept: the analyzed concept
+        - by_language: data for each requested language
+    """
+    # Sanitize inputs
+    concept = sanitize_string(concept, max_length=100)
+
+    # Parse and validate language codes
+    language_list = [sanitize_iso_code(l.strip()) for l in languages.split(",")]
+    language_list = [l for l in language_list if l]  # Remove empty
+
+    if not concept:
+        raise HTTPException(status_code=400, detail="Concept is required")
+    if not language_list:
+        raise HTTPException(status_code=400, detail="At least one valid language code is required")
+    if len(language_list) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 languages allowed")
+
+    logger.info(f"Comparing concept '{concept}' across {language_list}")
+
+    # TODO: Implement concept comparison
+    return {
+        "concept": concept,
+        "by_language": [{"language": lang, "forms": [], "trajectory": None} for lang in language_list],
     }
