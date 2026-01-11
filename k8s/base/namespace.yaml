@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ls-serving
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ls-data
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ls-compute
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ls-monitoring
