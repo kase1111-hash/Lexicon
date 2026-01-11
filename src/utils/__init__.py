@@ -34,7 +34,9 @@ from .logging import (
     set_request_id,
     setup_logging,
 )
+from .metrics import MetricsCollector, Timer as MetricsTimer, metrics, timed
 from .phonetics import PhoneticUtils
+from .telemetry import Span, SpanContext, Tracer, get_trace_context, traced, tracer
 from .validation import (
     AnachronismRequest,
     DateTextRequest,
@@ -113,4 +115,16 @@ __all__ = [
     "AnachronismRequest",
     "LSRCreateRequest",
     "GraphQueryRequest",
+    # Metrics
+    "metrics",
+    "MetricsCollector",
+    "MetricsTimer",
+    "timed",
+    # Telemetry
+    "tracer",
+    "Tracer",
+    "Span",
+    "SpanContext",
+    "traced",
+    "get_trace_context",
 ]

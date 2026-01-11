@@ -266,12 +266,14 @@ Key environment variables (see `.env.example`):
 
 ## Documentation
 
-- [API Documentation](docs/api.md)
+- [API Reference](docs/api-reference.md)
 - [Architecture Overview](docs/architecture.md)
 - [Data Model Reference](docs/data_model.md)
+- [FAQ](docs/faq.md)
+- [Troubleshooting](docs/troubleshooting.md)
 - [Contributing Guide](docs/contributing.md)
 - [Style Guide](docs/style-guide.md)
-- [Research Proposal](docs/research-proposal.md)
+- [Static Analysis Report](docs/static-analysis-report.md)
 
 ## Contributing
 

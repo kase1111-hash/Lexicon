@@ -83,28 +83,97 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Database connections closed")
 
 
+# OpenAPI Tags for documentation grouping
+tags_metadata = [
+    {
+        "name": "LSR",
+        "description": "Lexical State Record operations - CRUD and search",
+    },
+    {
+        "name": "Analysis",
+        "description": "Linguistic analysis endpoints - etymology, dating, semantic drift",
+    },
+    {
+        "name": "Graph",
+        "description": "Graph traversal and relationship queries",
+    },
+    {
+        "name": "Monitoring",
+        "description": "Health checks, metrics, and diagnostics",
+    },
+]
+
 # Create FastAPI application
 app = FastAPI(
     title="Linguistic Stratigraphy API",
     description="""
-    API for cross-linguistic lexical evolution analysis.
+# Linguistic Stratigraphy API
 
-    ## Features
+REST API for cross-linguistic lexical evolution analysis and historical linguistics research.
 
-    - **LSR Operations**: Search, retrieve, and analyze Lexical State Records
-    - **Etymology Analysis**: Trace word origins and evolution
-    - **Text Dating**: Date texts based on vocabulary analysis
-    - **Contact Detection**: Identify language contact events
-    - **Semantic Drift**: Track meaning changes over time
+## Overview
 
-    ## Authentication
+This API provides programmatic access to a knowledge graph of lexical evolution,
+enabling researchers to trace word origins, detect language contact events,
+and analyze semantic drift across languages and time periods.
 
-    API key authentication via `X-API-Key` header (when enabled).
+## Key Features
+
+- **LSR Operations**: Create, read, update, and search Lexical State Records (LSRs)
+- **Etymology Analysis**: Trace word origins through borrowing chains
+- **Text Dating**: Estimate text dates based on vocabulary analysis
+- **Contact Detection**: Identify language contact events from lexical evidence
+- **Semantic Drift**: Track meaning changes over time
+- **Graph Queries**: Traverse the lexical evolution graph
+
+## Authentication
+
+API key authentication via `X-API-Key` header (when enabled in production).
+
+## Rate Limiting
+
+- Default: 100 requests per minute
+- Configurable per environment
+
+## Response Format
+
+All responses are JSON with consistent error handling:
+
+```json
+{
+  "data": {...},
+  "meta": {"request_id": "...", "timestamp": "..."}
+}
+```
+
+## SDKs
+
+- Python: `pip install linguistic-stratigraphy`
+
+## Support
+
+- Documentation: https://linguistic-stratigraphy.readthedocs.io
+- Issues: https://github.com/linguistic-stratigraphy/linguistic-stratigraphy/issues
     """,
     version=settings.error_tracking.app_version,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    openapi_tags=tags_metadata,
+    contact={
+        "name": "Linguistic Stratigraphy Team",
+        "url": "https://github.com/linguistic-stratigraphy/linguistic-stratigraphy",
+        "email": "support@linguistic-stratigraphy.org",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    servers=[
+        {"url": "/", "description": "Current server"},
+        {"url": "http://localhost:8000", "description": "Local development"},
+    ],
 )
 
 # CORS configuration
@@ -328,21 +397,44 @@ async def health() -> dict:
 
 
 @app.get("/metrics", tags=["Monitoring"])
-async def metrics() -> dict:
+async def get_metrics():
     """
-    Basic metrics endpoint.
+    Prometheus-compatible metrics endpoint.
 
-    Returns operational metrics for monitoring.
+    Returns operational metrics in Prometheus text format.
     """
-    # In production, this would return Prometheus-style metrics
-    return {
-        "api_version": "0.1.0",
-        "metrics": {
-            "requests_total": "N/A - implement with prometheus_client",
-            "lsr_count": "N/A - query from database",
-            "edge_count": "N/A - query from database",
-        },
-    }
+    from fastapi.responses import PlainTextResponse
+
+    from src.utils.metrics import metrics
+
+    return PlainTextResponse(
+        content=metrics.export_prometheus(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
+@app.get("/metrics/json", tags=["Monitoring"])
+async def get_metrics_json() -> dict:
+    """
+    JSON metrics endpoint.
+
+    Returns all metrics as JSON for debugging.
+    """
+    from src.utils.metrics import metrics
+
+    return metrics.get_all_metrics()
+
+
+@app.get("/traces", tags=["Monitoring"])
+async def get_traces(limit: int = 100) -> list:
+    """
+    Get recent traces for debugging.
+
+    Returns the last N completed spans.
+    """
+    from src.utils.telemetry import tracer
+
+    return tracer.get_recent_spans(limit)
 
 
 def run() -> None:
