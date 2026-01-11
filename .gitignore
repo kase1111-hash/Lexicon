@@ -27,6 +27,13 @@ env/
 venv/
 ENV/
 
+# Environment files with secrets (keep templates in config/)
+.env.local
+*.env.local
+!config/.env.development
+!config/.env.staging
+!config/.env.production
+
 # IDE
 .idea/
 .vscode/
