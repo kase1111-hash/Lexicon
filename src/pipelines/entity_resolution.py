@@ -11,6 +11,7 @@ from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR
 from src.utils.phonetics import PhoneticUtils
 
+
 logger = logging.getLogger(__name__)
 
 

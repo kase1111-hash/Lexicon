@@ -1,7 +1,7 @@
 """FastAPI application entry point."""
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -30,6 +30,7 @@ from src.utils.logging import get_logger, setup_logging
 
 from .middleware import PerformanceLoggingMiddleware, RequestLoggingMiddleware
 from .routes import analysis, graph, lsr
+
 
 # Load configuration
 settings = get_settings()

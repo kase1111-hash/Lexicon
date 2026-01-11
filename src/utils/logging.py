@@ -15,9 +15,11 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any, TypeVar
 from uuid import uuid4
+
 
 # Context variable for request correlation ID
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
@@ -58,7 +60,7 @@ class JsonFormatter(logging.Formatter):
         log_data: dict[str, Any] = {}
 
         if self.include_timestamp:
-            log_data["timestamp"] = datetime.now(timezone.utc).isoformat()
+            log_data["timestamp"] = datetime.now(UTC).isoformat()
 
         if self.include_level:
             log_data["level"] = record.levelname

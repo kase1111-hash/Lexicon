@@ -1,10 +1,10 @@
 """Graph query API routes."""
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
+
 
 router = APIRouter()
 

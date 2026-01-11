@@ -6,12 +6,13 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 
 from src.exceptions import InvalidDateRangeError, LSRNotFoundError
-from src.models import ErrorResponse, PaginatedResponse
+from src.models import ErrorResponse
 from src.utils.validation import (
     LSRCreateRequest,
     sanitize_iso_code,
     sanitize_string,
 )
+
 
 logger = logging.getLogger(__name__)
 

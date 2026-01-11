@@ -1,7 +1,7 @@
 """OCR adapter for digitized manuscripts and historical documents."""
 
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Iterator
 
 from .base import RawLexicalEntry, SourceAdapter
 

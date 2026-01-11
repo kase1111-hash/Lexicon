@@ -1,5 +1,6 @@
 """Source adapters for ingesting etymological data from various sources."""
 
-from .base import SourceAdapter, RawLexicalEntry
+from .base import RawLexicalEntry, SourceAdapter
 
-__all__ = ["SourceAdapter", "RawLexicalEntry"]
+
+__all__ = ["RawLexicalEntry", "SourceAdapter"]

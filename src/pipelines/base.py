@@ -7,6 +7,7 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
+
 logger = logging.getLogger(__name__)
 
 # Type variables for generic pipeline

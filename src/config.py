@@ -235,7 +235,7 @@ class Settings(BaseSettings):
         }
 
         for secret_key, (section, attr) in secret_mappings.items():
-            if secret_key in secrets and secrets[secret_key]:
+            if secrets.get(secret_key):
                 section_obj = getattr(self, section)
                 setattr(section_obj, attr, SecretStr(secrets[secret_key]))
 
@@ -306,8 +306,9 @@ def _load_aws_secrets(config: SecretsManagerConfig) -> dict[str, Any]:
         return {}
 
     try:
-        import boto3
         import json
+
+        import boto3
 
         client = boto3.client("secretsmanager", region_name=config.aws_region)
         response = client.get_secret_value(SecretId=config.aws_secret_name)
@@ -352,8 +353,9 @@ def _load_gcp_secrets(config: SecretsManagerConfig) -> dict[str, Any]:
         return {}
 
     try:
-        from google.cloud import secretmanager
         import json
+
+        from google.cloud import secretmanager
 
         client = secretmanager.SecretManagerServiceClient()
 

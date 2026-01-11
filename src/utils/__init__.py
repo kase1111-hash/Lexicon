@@ -54,6 +54,7 @@ from .validation import (
     sanitize_year,
 )
 
+
 __all__ = [
     # Database
     "DatabaseManager",
