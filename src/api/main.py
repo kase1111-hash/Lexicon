@@ -1,7 +1,5 @@
 """FastAPI application entry point."""
 
-import logging
-import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -11,10 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError as PydanticValidationError
 
+from src.config import get_settings, is_production
 from src.exceptions import (
     AnalysisError,
     AuthenticationError,
     AuthorizationError,
+    ConfigurationError,
     DatabaseError,
     DuplicateError,
     ExternalServiceError,
@@ -25,15 +25,42 @@ from src.exceptions import (
     ValidationError,
 )
 from src.utils.db import close_db, get_db
+from src.utils.error_tracking import capture_error, init_error_tracking
+from src.utils.logging import get_logger, setup_logging
 
+from .middleware import PerformanceLoggingMiddleware, RequestLoggingMiddleware
 from .routes import analysis, graph, lsr
 
-# Configure logging
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+# Load configuration
+settings = get_settings()
+
+# Validate production configuration
+if is_production():
+    config_errors = settings.validate_required_for_production()
+    if config_errors:
+        raise ConfigurationError(
+            message="Invalid production configuration",
+            details={"errors": config_errors},
+        )
+
+# Configure logging with settings
+setup_logging(
+    level=settings.logging.log_level,
+    json_format=settings.logging.log_format == "json",
+    log_file=settings.logging.log_file,
+    component_levels={
+        "src.api": settings.logging.api_log_level,
+        "src.pipelines": settings.logging.pipeline_log_level,
+        "src.utils.db": settings.logging.db_log_level,
+    },
 )
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+# Initialize error tracking
+init_error_tracking(environment=settings.error_tracking.environment)
+
+# Log configuration (with sensitive values masked)
+logger.debug(f"Configuration loaded: {settings.mask_sensitive()}")
 
 
 @asynccontextmanager
@@ -73,20 +100,28 @@ app = FastAPI(
 
     API key authentication via `X-API-Key` header (when enabled).
     """,
-    version="0.1.0",
+    version=settings.error_tracking.app_version,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
 # CORS configuration
-cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_origins=settings.api.cors_origins_list,
+    allow_credentials=settings.api.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Request logging middleware
+app.add_middleware(RequestLoggingMiddleware)
+
+# Performance monitoring middleware (logs slow requests)
+app.add_middleware(
+    PerformanceLoggingMiddleware,
+    slow_request_threshold_ms=settings.logging.slow_request_threshold_ms,
 )
 
 
@@ -223,6 +258,15 @@ async def lexicon_error_handler(request: Request, exc: LexiconError) -> JSONResp
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle uncaught exceptions."""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
+
+    # Capture error with Sentry and other integrations
+    capture_error(
+        exc,
+        path=str(request.url.path),
+        method=request.method,
+        client_ip=request.client.host if request.client else None,
+    )
+
     return JSONResponse(
         status_code=500,
         content={

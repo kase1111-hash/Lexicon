@@ -4,6 +4,7 @@
 
 # Core
 pydantic>=2.0
+pydantic-settings>=2.0
 httpx>=0.24
 aiohttp>=3.8
 
@@ -30,6 +31,9 @@ numpy>=1.24
 fastapi>=0.100
 uvicorn>=0.23
 strawberry-graphql>=0.200
+
+# Error Tracking & Monitoring
+sentry-sdk[fastapi]>=1.29
 
 # Orchestration
 apache-airflow>=2.7
