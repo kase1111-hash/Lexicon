@@ -2,8 +2,9 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
+from src.exceptions import InvalidDateRangeError, InvalidLanguageCodeError, ValidationError
 from src.models import ErrorResponse
 from src.utils.validation import (
     AnachronismRequest,
@@ -105,10 +106,10 @@ async def get_contact_events(
     # Sanitize and validate
     language = sanitize_iso_code(language)
     if not language:
-        raise HTTPException(status_code=400, detail="Invalid language code")
+        raise InvalidLanguageCodeError(language_code=language)
 
     if date_start is not None and date_end is not None and date_end < date_start:
-        raise HTTPException(status_code=400, detail="date_end must be >= date_start")
+        raise InvalidDateRangeError(start_date=date_start, end_date=date_end)
 
     logger.info(f"Fetching contact events for {language}, dates={date_start}-{date_end}")
 
@@ -139,9 +140,9 @@ async def get_semantic_drift(
     language = sanitize_iso_code(language)
 
     if not form:
-        raise HTTPException(status_code=400, detail="Form is required")
+        raise ValidationError(message="Form is required", field="form")
     if not language:
-        raise HTTPException(status_code=400, detail="Invalid language code")
+        raise InvalidLanguageCodeError(language_code=language)
 
     logger.info(f"Fetching semantic drift for '{form}' in {language}")
 
@@ -180,11 +181,11 @@ async def compare_concept(
     language_list = [l for l in language_list if l]  # Remove empty
 
     if not concept:
-        raise HTTPException(status_code=400, detail="Concept is required")
+        raise ValidationError(message="Concept is required", field="concept")
     if not language_list:
-        raise HTTPException(status_code=400, detail="At least one valid language code is required")
+        raise ValidationError(message="At least one valid language code is required", field="languages")
     if len(language_list) > 10:
-        raise HTTPException(status_code=400, detail="Maximum 10 languages allowed")
+        raise ValidationError(message="Maximum 10 languages allowed", field="languages")
 
     logger.info(f"Comparing concept '{concept}' across {language_list}")
 

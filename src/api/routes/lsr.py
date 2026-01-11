@@ -3,8 +3,9 @@
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
+from src.exceptions import InvalidDateRangeError, LSRNotFoundError
 from src.models import ErrorResponse, PaginatedResponse
 from src.utils.validation import (
     LSRCreateRequest,
@@ -30,7 +31,7 @@ async def get_lsr(lsr_id: UUID) -> dict:
     """
     # TODO: Implement LSR retrieval from database
     logger.info(f"Fetching LSR: {lsr_id}")
-    raise HTTPException(status_code=404, detail=f"LSR not found: {lsr_id}")
+    raise LSRNotFoundError(lsr_id=str(lsr_id))
 
 
 @router.get("/search")
@@ -65,10 +66,7 @@ async def search_lsr(
     # Validate date range
     if date_start is not None and date_end is not None:
         if date_end < date_start:
-            raise HTTPException(
-                status_code=400,
-                detail="date_end must be greater than or equal to date_start",
-            )
+            raise InvalidDateRangeError(start_date=date_start, end_date=date_end)
 
     logger.info(f"Searching LSRs: form={form}, language={language}, dates={date_start}-{date_end}")
 
