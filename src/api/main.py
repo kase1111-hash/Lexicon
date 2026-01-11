@@ -1,6 +1,5 @@
 """FastAPI application entry point."""
 
-import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -10,10 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError as PydanticValidationError
 
+from src.config import get_settings, is_production
 from src.exceptions import (
     AnalysisError,
     AuthenticationError,
     AuthorizationError,
+    ConfigurationError,
     DatabaseError,
     DuplicateError,
     ExternalServiceError,
@@ -24,27 +25,42 @@ from src.exceptions import (
     ValidationError,
 )
 from src.utils.db import close_db, get_db
-from src.utils.error_tracking import SentryIntegration, capture_error, init_error_tracking
+from src.utils.error_tracking import capture_error, init_error_tracking
 from src.utils.logging import get_logger, setup_logging
 
 from .middleware import PerformanceLoggingMiddleware, RequestLoggingMiddleware
 from .routes import analysis, graph, lsr
 
-# Configure logging with our custom setup
+# Load configuration
+settings = get_settings()
+
+# Validate production configuration
+if is_production():
+    config_errors = settings.validate_required_for_production()
+    if config_errors:
+        raise ConfigurationError(
+            message="Invalid production configuration",
+            details={"errors": config_errors},
+        )
+
+# Configure logging with settings
 setup_logging(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    json_format=os.getenv("LOG_FORMAT", "text").lower() == "json",
-    log_file=os.getenv("LOG_FILE"),
+    level=settings.logging.log_level,
+    json_format=settings.logging.log_format == "json",
+    log_file=settings.logging.log_file,
     component_levels={
-        "src.api": os.getenv("API_LOG_LEVEL", "INFO"),
-        "src.pipelines": os.getenv("PIPELINE_LOG_LEVEL", "INFO"),
-        "src.utils.db": os.getenv("DB_LOG_LEVEL", "WARNING"),
+        "src.api": settings.logging.api_log_level,
+        "src.pipelines": settings.logging.pipeline_log_level,
+        "src.utils.db": settings.logging.db_log_level,
     },
 )
 logger = get_logger(__name__)
 
-# Initialize error tracking (Sentry, Elasticsearch)
-init_error_tracking(environment=os.getenv("ENVIRONMENT", "development"))
+# Initialize error tracking
+init_error_tracking(environment=settings.error_tracking.environment)
+
+# Log configuration (with sensitive values masked)
+logger.debug(f"Configuration loaded: {settings.mask_sensitive()}")
 
 
 @asynccontextmanager
@@ -84,18 +100,17 @@ app = FastAPI(
 
     API key authentication via `X-API-Key` header (when enabled).
     """,
-    version="0.1.0",
+    version=settings.error_tracking.app_version,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
 # CORS configuration
-cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_origins=settings.api.cors_origins_list,
+    allow_credentials=settings.api.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -104,8 +119,10 @@ app.add_middleware(
 app.add_middleware(RequestLoggingMiddleware)
 
 # Performance monitoring middleware (logs slow requests)
-slow_request_threshold = float(os.getenv("SLOW_REQUEST_THRESHOLD_MS", "1000"))
-app.add_middleware(PerformanceLoggingMiddleware, slow_request_threshold_ms=slow_request_threshold)
+app.add_middleware(
+    PerformanceLoggingMiddleware,
+    slow_request_threshold_ms=settings.logging.slow_request_threshold_ms,
+)
 
 
 # =============================================================================

@@ -4,6 +4,7 @@
 
 # Core
 pydantic>=2.0
+pydantic-settings>=2.0
 httpx>=0.24
 aiohttp>=3.8
 

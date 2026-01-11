@@ -2,6 +2,17 @@
 
 __version__ = "0.1.0"
 
+from src.config import (
+    Settings,
+    get_api_config,
+    get_database_config,
+    get_error_tracking_config,
+    get_logging_config,
+    get_settings,
+    is_debug,
+    is_production,
+    reload_settings,
+)
 from src.exceptions import (
     AnalysisError,
     AuthenticationError,
@@ -27,6 +38,16 @@ from src.exceptions import (
 
 __all__ = [
     "__version__",
+    # Configuration
+    "Settings",
+    "get_settings",
+    "reload_settings",
+    "get_database_config",
+    "get_api_config",
+    "get_logging_config",
+    "get_error_tracking_config",
+    "is_production",
+    "is_debug",
     # Base exception
     "LexiconError",
     # Client errors (4xx)
