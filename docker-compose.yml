@@ -1,0 +1,210 @@
+version: '3.8'
+
+services:
+  # Graph Database
+  neo4j:
+    image: neo4j:5.9
+    container_name: ls-neo4j
+    environment:
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
+      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=2G
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7474"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - ls-network
+
+  # Relational Database
+  postgres:
+    image: postgres:15
+    container_name: ls-postgres
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-linguistic_stratigraphy}
+      - POSTGRES_USER=${POSTGRES_USER:-ls_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ls_user} -d ${POSTGRES_DB:-linguistic_stratigraphy}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ls-network
+
+  # Full-text Search
+  elasticsearch:
+    image: elasticsearch:8.9.0
+    container_name: ls-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx1g"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - ls-network
+
+  # Cache
+  redis:
+    image: redis:7-alpine
+    container_name: ls-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ls-network
+
+  # Vector Database
+  milvus:
+    image: milvusdb/milvus:v2.3.0
+    container_name: ls-milvus
+    environment:
+      - ETCD_ENDPOINTS=etcd:2379
+      - MINIO_ADDRESS=minio:9000
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      - etcd
+      - minio
+    networks:
+      - ls-network
+
+  # Milvus dependencies
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: ls-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    networks:
+      - ls-network
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: ls-minio
+    environment:
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - ls-network
+
+  # Workflow Orchestration
+  airflow:
+    image: apache/airflow:2.7.0
+    container_name: ls-airflow
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-ls_user}:${POSTGRES_PASSWORD:-password}@postgres/${POSTGRES_DB:-linguistic_stratigraphy}
+      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY:-}
+      - AIRFLOW__WEBSERVER__SECRET_KEY=${AIRFLOW_SECRET_KEY:-secret}
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      bash -c "airflow db init &&
+               airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true &&
+               airflow webserver & airflow scheduler"
+    networks:
+      - ls-network
+
+  # API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ls-api
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
+      - POSTGRES_URI=postgresql://${POSTGRES_USER:-ls_user}:${POSTGRES_PASSWORD:-password}@postgres/${POSTGRES_DB:-linguistic_stratigraphy}
+      - ELASTICSEARCH_URI=http://elasticsearch:9200
+      - REDIS_URI=redis://redis:6379
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_KEY=${API_KEY:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src:ro
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ls-network
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  postgres_data:
+  es_data:
+  redis_data:
+  milvus_data:
+  etcd_data:
+  minio_data:
+  airflow_logs:
+
+networks:
+  ls-network:
+    driver: bridge
