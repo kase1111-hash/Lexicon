@@ -33,7 +33,7 @@ Testing & Validation
 ✅ Run dynamic analysis (fuzzing, runtime behavior) — Covered by performance tests
 Build, Deployment & Monitoring
 ✅ Create automated build scripts (Makefile, .bat, shell)
- Set up CI/CD pipeline (GitHub Actions, Jenkins, etc.)
+✅ Set up CI/CD pipeline (GitHub Actions, Jenkins, etc.)
  Configure environment-specific settings (dev/stage/prod)
  Build distributable packages (Dockerfile, zip, exe)
  Create installer or assembly file (.bat, setup wizard) — N/A: npm package
