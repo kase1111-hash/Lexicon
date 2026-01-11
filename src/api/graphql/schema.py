@@ -1,6 +1,5 @@
 """GraphQL schema definition using Strawberry."""
 
-from typing import Optional
 
 import strawberry
 
@@ -11,8 +10,8 @@ class Attestation:
 
     text: str
     source: str
-    date: Optional[int]
-    url: Optional[str]
+    date: int | None
+    url: str | None
 
 
 @strawberry.type
@@ -21,7 +20,7 @@ class Language:
 
     iso_code: str
     name: str
-    family: Optional[str]
+    family: str | None
     branch_path: list[str]
     is_living: bool
 
@@ -32,7 +31,7 @@ class SemanticField:
 
     synset_id: str
     label: str
-    domain: Optional[str]
+    domain: str | None
 
 
 @strawberry.type
@@ -41,7 +40,7 @@ class TrajectoryPoint:
 
     date: int
     embedding_2d: list[float]
-    definition: Optional[str]
+    definition: str | None
     attestation_count: int
 
 
@@ -52,8 +51,8 @@ class ShiftEvent:
     date: int
     change_type: str
     confidence: float
-    before_meaning: Optional[str]
-    after_meaning: Optional[str]
+    before_meaning: str | None
+    after_meaning: str | None
 
 
 @strawberry.type
@@ -70,10 +69,10 @@ class LSR:
 
     id: strawberry.ID
     form: str
-    form_phonetic: Optional[str]
+    form_phonetic: str | None
     language: Language
-    date_start: Optional[int]
-    date_end: Optional[int]
+    date_start: int | None
+    date_end: int | None
     definitions: list[str]
     confidence: float
     is_reconstructed: bool
@@ -86,7 +85,7 @@ class DiagnosticWord:
 
     form: str
     date_contribution: float
-    earliest_attestation: Optional[int]
+    earliest_attestation: int | None
 
 
 @strawberry.type
@@ -120,7 +119,7 @@ class Query:
     """Root query type."""
 
     @strawberry.field
-    def lsr(self, id: strawberry.ID) -> Optional[LSR]:
+    def lsr(self, id: strawberry.ID) -> LSR | None:
         """Get an LSR by ID."""
         # TODO: Implement resolver
         return None
@@ -128,10 +127,10 @@ class Query:
     @strawberry.field
     def search_lsr(
         self,
-        form: Optional[str] = None,
-        language: Optional[str] = None,
-        date_start: Optional[int] = None,
-        date_end: Optional[int] = None,
+        form: str | None = None,
+        language: str | None = None,
+        date_start: int | None = None,
+        date_end: int | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[LSR]:
@@ -140,13 +139,13 @@ class Query:
         return []
 
     @strawberry.field
-    def language(self, iso_code: str) -> Optional[Language]:
+    def language(self, iso_code: str) -> Language | None:
         """Get a language by ISO code."""
         # TODO: Implement resolver
         return None
 
     @strawberry.field
-    def languages(self, family: Optional[str] = None) -> list[Language]:
+    def languages(self, family: str | None = None) -> list[Language]:
         """Get all languages, optionally filtered by family."""
         # TODO: Implement resolver
         return []

@@ -1,7 +1,7 @@
 """Wiktionary adapter for ingesting etymological data from Wiktionary dumps and API."""
 
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Iterator
 
 from .base import RawLexicalEntry, SourceAdapter
 

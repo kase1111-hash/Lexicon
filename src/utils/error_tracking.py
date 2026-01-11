@@ -11,10 +11,12 @@ import logging
 import os
 import queue
 import threading
-from datetime import datetime, timezone
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from src.utils.logging import get_logger, get_request_id
+
 
 logger = get_logger(__name__)
 
@@ -337,7 +339,7 @@ class ElasticsearchHandler(logging.Handler):
     def _format_record(self, record: logging.LogRecord) -> dict:
         """Format log record as Elasticsearch document."""
         doc = {
-            "@timestamp": datetime.now(timezone.utc).isoformat(),
+            "@timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": self.format(record),
@@ -399,7 +401,7 @@ class ElasticsearchHandler(logging.Handler):
 
             try:
                 # Build bulk request
-                index_name = f"{self.index_prefix}-{datetime.now(timezone.utc).strftime('%Y.%m.%d')}"
+                index_name = f"{self.index_prefix}-{datetime.now(UTC).strftime('%Y.%m.%d')}"
                 actions = []
                 for doc in docs:
                     actions.append({"index": {"_index": index_name}})
@@ -471,7 +473,7 @@ class ErrorNotifier:
             return
 
         # Add common context
-        context.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+        context.setdefault("timestamp", datetime.now(UTC).isoformat())
         context.setdefault("request_id", get_request_id())
         context.setdefault("error_type", type(error).__name__)
         context.setdefault("error_message", str(error))
@@ -485,7 +487,7 @@ class ErrorNotifier:
     @classmethod
     def _should_notify(cls) -> bool:
         """Check if we should send a notification (rate limiting)."""
-        now = datetime.now(timezone.utc).timestamp()
+        now = datetime.now(UTC).timestamp()
 
         with cls._lock:
             # Remove old entries

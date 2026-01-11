@@ -1,8 +1,9 @@
 """Abstract base class for all source adapters."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Any, Iterator
+from typing import Any
 
 from pydantic import BaseModel, Field
 

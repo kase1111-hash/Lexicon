@@ -1,12 +1,13 @@
 """FastAPI middleware for logging and request tracking."""
 
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.utils.logging import clear_request_id, get_logger, set_request_id
+
 
 logger = get_logger(__name__)
 

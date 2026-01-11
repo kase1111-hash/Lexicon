@@ -1,0 +1,38 @@
+# Development override for docker-compose
+# This file is automatically loaded with docker-compose up
+
+version: '3.8'
+
+services:
+  neo4j:
+    environment:
+      - NEO4J_AUTH=neo4j/development_password
+
+  postgres:
+    environment:
+      - POSTGRES_PASSWORD=development_password
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ls-api-dev
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - LOG_FORMAT=text
+    volumes:
+      # Mount source code for hot reloading
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+    ports:
+      - "8000:8000"
+    command: uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+    depends_on:
+      - neo4j
+      - postgres
+      - redis
+      - elasticsearch
+    networks:
+      - ls-network

@@ -1,7 +1,7 @@
 """Corpus adapter for historical text corpora."""
 
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Iterator
 
 from .base import RawLexicalEntry, SourceAdapter
 

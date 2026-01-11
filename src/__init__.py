@@ -36,6 +36,7 @@ from src.exceptions import (
     ValidationError,
 )
 
+
 __all__ = [
     "__version__",
     # Configuration

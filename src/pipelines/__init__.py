@@ -12,6 +12,7 @@ from .entity_resolution import (
 from .relationship_extraction import RelationshipExtractor
 from .validation import Validator
 
+
 __all__ = [
     # Base
     "BasePipeline",

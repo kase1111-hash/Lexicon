@@ -2,4 +2,5 @@
 
 from . import analysis, graph, lsr
 
-__all__ = ["lsr", "analysis", "graph"]
+
+__all__ = ["analysis", "graph", "lsr"]
