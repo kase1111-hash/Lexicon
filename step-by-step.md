@@ -25,7 +25,7 @@ Testing & Validation
 ✅ Write integration tests
 ✅ Write system/acceptance tests
 ✅ Add regression test suite
- Conduct performance testing (load, stress)
+✅ Conduct performance testing (load, stress)
  Perform security checks (input, encryption, tokens)
  Perform exploit testing (SQLi, XSS, overflow) — N/A: No SQL/DOM; see code-audit.md
  Check for backdoors & unauthorized access — Verified via code audit
