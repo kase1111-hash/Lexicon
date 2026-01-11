@@ -328,21 +328,44 @@ async def health() -> dict:
 
 
 @app.get("/metrics", tags=["Monitoring"])
-async def metrics() -> dict:
+async def get_metrics():
     """
-    Basic metrics endpoint.
+    Prometheus-compatible metrics endpoint.
 
-    Returns operational metrics for monitoring.
+    Returns operational metrics in Prometheus text format.
     """
-    # In production, this would return Prometheus-style metrics
-    return {
-        "api_version": "0.1.0",
-        "metrics": {
-            "requests_total": "N/A - implement with prometheus_client",
-            "lsr_count": "N/A - query from database",
-            "edge_count": "N/A - query from database",
-        },
-    }
+    from fastapi.responses import PlainTextResponse
+
+    from src.utils.metrics import metrics
+
+    return PlainTextResponse(
+        content=metrics.export_prometheus(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
+@app.get("/metrics/json", tags=["Monitoring"])
+async def get_metrics_json() -> dict:
+    """
+    JSON metrics endpoint.
+
+    Returns all metrics as JSON for debugging.
+    """
+    from src.utils.metrics import metrics
+
+    return metrics.get_all_metrics()
+
+
+@app.get("/traces", tags=["Monitoring"])
+async def get_traces(limit: int = 100) -> list:
+    """
+    Get recent traces for debugging.
+
+    Returns the last N completed spans.
+    """
+    from src.utils.telemetry import tracer
+
+    return tracer.get_recent_spans(limit)
 
 
 def run() -> None:
