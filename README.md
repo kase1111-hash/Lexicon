@@ -1,5 +1,3 @@
-Excellent critique. You've identified exactly where this was hand-wavy. Let me produce the revised version with teeth.
-
 Computational Linguistic Stratigraphy: A Temporal-Semantic Model for Cross-Language Lexical Evolution
 Version 2.0 — Revised Framework
 
