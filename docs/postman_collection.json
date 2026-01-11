@@ -1,0 +1,887 @@
+{
+  "info": {
+    "name": "Linguistic Stratigraphy API",
+    "description": "\n# Linguistic Stratigraphy API\n\nREST API for cross-linguistic lexical evolution analysis and historical linguistics research.\n\n## Overview\n\nThis API provides programmatic access to a knowledge graph of lexical evolution,\nenabling researchers to trace word origins, detect language contact events,\nand analyze semantic drift across languages and time periods.\n\n## Key Features\n\n- **LSR Operations**: Create, read, update, and search Lexical State Records (LSRs)\n- **Etymology Analysis**: Trace word origins through borrowing chains\n- **Text Dating**: Estimate text dates based on vocabulary analysis\n- **Contact Detection**: Identify language contact events from lexical evidence\n- **Semantic Drift**: Track meaning changes over time\n- **Graph Queries**: Traverse the lexical evolution graph\n\n## Authentication\n\nAPI key authentication via `X-API-Key` header (when enabled in production).\n\n## Rate Limiting\n\n- Default: 100 requests per minute\n- Configurable per environment\n\n## Response Format\n\nAll responses are JSON with consistent error handling:\n\n```json\n{\n  \"data\": {...},\n  \"meta\": {\"request_id\": \"...\", \"timestamp\": \"...\"}\n}\n```\n\n## SDKs\n\n- Python: `pip install linguistic-stratigraphy`\n\n## Support\n\n- Documentation: https://linguistic-stratigraphy.readthedocs.io\n- Issues: https://github.com/linguistic-stratigraphy/linguistic-stratigraphy/issues\n    ",
+    "version": "0.1.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "LSR",
+      "item": [
+        {
+          "name": "Get Lsr",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lsr/{lsr_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "lsr",
+                "{lsr_id}"
+              ],
+              "variable": [
+                {
+                  "key": "lsr_id",
+                  "value": "<lsr_id>",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get a full LSR record by ID.\n\nReturns the complete Lexical State Record including all fields,\nattestations, and relationship IDs."
+          },
+          "response": []
+        },
+        {
+          "name": "Search Lsr",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lsr/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "lsr",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "form",
+                  "value": "",
+                  "description": "Form to search (exact or fuzzy)",
+                  "disabled": true
+                },
+                {
+                  "key": "language",
+                  "value": "",
+                  "description": "ISO 639-3 language code",
+                  "disabled": true
+                },
+                {
+                  "key": "date_start",
+                  "value": "",
+                  "description": "Start year (negative for BCE)",
+                  "disabled": true
+                },
+                {
+                  "key": "date_end",
+                  "value": "",
+                  "description": "End year",
+                  "disabled": true
+                },
+                {
+                  "key": "semantic_field",
+                  "value": "",
+                  "description": "WordNet synset ID filter",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "Maximum results to return",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "description": "Number of results to skip",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Search for LSRs matching criteria.\n\nSupports filtering by:\n- Form (orthographic, supports fuzzy matching)\n- Language code (ISO 639-3)\n- Date range\n- Semantic field (WordNet synset)\n\nReturns paginated results."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Lsr",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lsr/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "lsr"
+              ]
+            },
+            "description": "Create a new LSR record.\n\nThe form_orthographic and language_code are required.\nOther fields are optional.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"form_orthographic\": \"string\",\n  \"form_phonetic\": \"\",\n  \"language_code\": \"string\",\n  \"definition_primary\": \"\",\n  \"date_start\": {},\n  \"date_end\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Etymology",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lsr/{lsr_id}/etymology",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "lsr",
+                "{lsr_id}",
+                "etymology"
+              ],
+              "variable": [
+                {
+                  "key": "lsr_id",
+                  "value": "<lsr_id>",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get the full etymology chain to proto-form.\n\nTraces the DESCENDS_FROM relationships back to the earliest\nreconstructed or attested ancestor."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Descendants",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lsr/{lsr_id}/descendants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "lsr",
+                "{lsr_id}",
+                "descendants"
+              ],
+              "variable": [
+                {
+                  "key": "lsr_id",
+                  "value": "<lsr_id>",
+                  "description": ""
+                }
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "",
+                  "description": "Maximum depth to traverse",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get descendant tree.\n\nReturns all LSRs that descend from this one, up to the specified depth."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Cognates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lsr/{lsr_id}/cognates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "lsr",
+                "{lsr_id}",
+                "cognates"
+              ],
+              "variable": [
+                {
+                  "key": "lsr_id",
+                  "value": "<lsr_id>",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get all cognate LSRs across languages.\n\nReturns words in other languages that share a common ancestor\nwith this LSR."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Borrowings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/lsr/{lsr_id}/borrowings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "lsr",
+                "{lsr_id}",
+                "borrowings"
+              ],
+              "variable": [
+                {
+                  "key": "lsr_id",
+                  "value": "<lsr_id>",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get borrowing relationships for an LSR.\n\nReturns both words this LSR borrowed from (loan_source)\nand words that borrowed from this LSR (loan_targets)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Analysis",
+      "item": [
+        {
+          "name": "Date Text",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analyze/date-text",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analyze",
+                "date-text"
+              ]
+            },
+            "description": "Predict the date range of a text based on vocabulary.\n\nAnalyzes the vocabulary in the text and compares it against\nhistorical attestation data to estimate when the text was composed.\n\nReturns:\n    - predicted_date_range: [start_year, end_year]\n    - confidence: 0.0 to 1.0\n    - diagnostic_vocabulary: words that most influenced the dating",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"string\",\n  \"language\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Detect Anachronisms",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analyze/detect-anachronisms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analyze",
+                "detect-anachronisms"
+              ]
+            },
+            "description": "Detect anachronistic vocabulary in a text.\n\nCompares the vocabulary in the text against the claimed date\nto identify words that were not yet in use at that time.\n\nReturns:\n    - anachronisms: list of words with earliest attestation dates\n    - verdict: \"consistent\", \"suspicious\", or \"anachronistic\"",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"string\",\n  \"claimed_date\": -10000.0,\n  \"language\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Contact Events",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analyze/contact-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analyze",
+                "contact-events"
+              ],
+              "query": [
+                {
+                  "key": "language",
+                  "value": "",
+                  "description": "ISO 639-3 language code",
+                  "disabled": false
+                },
+                {
+                  "key": "date_start",
+                  "value": "",
+                  "description": "Start year",
+                  "disabled": true
+                },
+                {
+                  "key": "date_end",
+                  "value": "",
+                  "description": "End year",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get detected language contact events.\n\nReturns contact events where the specified language was either\na donor or recipient of vocabulary.\n\nEach contact event includes:\n    - donor_language: source of borrowed words\n    - date_range: when the contact occurred\n    - vocabulary_count: number of words transferred\n    - confidence: certainty of the detection\n    - sample_words: example borrowed words"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Semantic Drift",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analyze/semantic-drift",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analyze",
+                "semantic-drift"
+              ],
+              "query": [
+                {
+                  "key": "form",
+                  "value": "",
+                  "description": "Word form to analyze",
+                  "disabled": false
+                },
+                {
+                  "key": "language",
+                  "value": "",
+                  "description": "ISO 639-3 language code",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Get semantic drift trajectory for a word.\n\nTracks how a word's meaning has changed over time by analyzing\nits semantic embeddings across different time periods.\n\nReturns:\n    - trajectory: list of {date, embedding_2d, definition}\n    - shift_events: detected semantic shift events with types"
+          },
+          "response": []
+        },
+        {
+          "name": "Compare Concept",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analyze/compare-concept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analyze",
+                "compare-concept"
+              ],
+              "query": [
+                {
+                  "key": "concept",
+                  "value": "",
+                  "description": "Concept to compare (e.g., 'freedom')",
+                  "disabled": false
+                },
+                {
+                  "key": "languages",
+                  "value": "",
+                  "description": "Comma-separated ISO 639-3 codes",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Compare how a concept is expressed across languages.\n\nAnalyzes the semantic trajectories of translations/equivalents\nof a concept across multiple languages.\n\nReturns:\n    - concept: the analyzed concept\n    - by_language: data for each requested language"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Graph",
+      "item": [
+        {
+          "name": "Execute Query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/graph/query",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "graph",
+                "query"
+              ]
+            },
+            "description": "Execute a graph query (Cypher or GraphQL).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Path",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/graph/path",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "graph",
+                "path"
+              ],
+              "query": [
+                {
+                  "key": "from_lsr",
+                  "value": "",
+                  "description": "Source LSR ID",
+                  "disabled": false
+                },
+                {
+                  "key": "to_lsr",
+                  "value": "",
+                  "description": "Target LSR ID",
+                  "disabled": false
+                },
+                {
+                  "key": "max_hops",
+                  "value": "",
+                  "description": "Maximum path length",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Find all paths between two LSRs."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Bulk Export",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/graph/bulk/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "graph",
+                "bulk",
+                "export"
+              ]
+            },
+            "description": "Create a bulk export job.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language\": \"string\",\n  \"format\": \"json\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Export Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/graph/bulk/status/{job_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "graph",
+                "bulk",
+                "status",
+                "{job_id}"
+              ],
+              "variable": [
+                {
+                  "key": "job_id",
+                  "value": "<job_id>",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get status of a bulk export job."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Root",
+      "item": [
+        {
+          "name": "Root",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": []
+            },
+            "description": "Root endpoint with API information."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Health check endpoint.\n\nReturns the health status of the API and its dependencies."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Monitoring",
+      "item": [
+        {
+          "name": "Get Metrics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            },
+            "description": "Prometheus-compatible metrics endpoint.\n\nReturns operational metrics in Prometheus text format."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Metrics Json",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/metrics/json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics",
+                "json"
+              ]
+            },
+            "description": "JSON metrics endpoint.\n\nReturns all metrics as JSON for debugging."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Traces",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/traces",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "traces"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get recent traces for debugging.\n\nReturns the last N completed spans."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

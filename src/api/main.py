@@ -83,28 +83,97 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Database connections closed")
 
 
+# OpenAPI Tags for documentation grouping
+tags_metadata = [
+    {
+        "name": "LSR",
+        "description": "Lexical State Record operations - CRUD and search",
+    },
+    {
+        "name": "Analysis",
+        "description": "Linguistic analysis endpoints - etymology, dating, semantic drift",
+    },
+    {
+        "name": "Graph",
+        "description": "Graph traversal and relationship queries",
+    },
+    {
+        "name": "Monitoring",
+        "description": "Health checks, metrics, and diagnostics",
+    },
+]
+
 # Create FastAPI application
 app = FastAPI(
     title="Linguistic Stratigraphy API",
     description="""
-    API for cross-linguistic lexical evolution analysis.
+# Linguistic Stratigraphy API
 
-    ## Features
+REST API for cross-linguistic lexical evolution analysis and historical linguistics research.
 
-    - **LSR Operations**: Search, retrieve, and analyze Lexical State Records
-    - **Etymology Analysis**: Trace word origins and evolution
-    - **Text Dating**: Date texts based on vocabulary analysis
-    - **Contact Detection**: Identify language contact events
-    - **Semantic Drift**: Track meaning changes over time
+## Overview
 
-    ## Authentication
+This API provides programmatic access to a knowledge graph of lexical evolution,
+enabling researchers to trace word origins, detect language contact events,
+and analyze semantic drift across languages and time periods.
 
-    API key authentication via `X-API-Key` header (when enabled).
+## Key Features
+
+- **LSR Operations**: Create, read, update, and search Lexical State Records (LSRs)
+- **Etymology Analysis**: Trace word origins through borrowing chains
+- **Text Dating**: Estimate text dates based on vocabulary analysis
+- **Contact Detection**: Identify language contact events from lexical evidence
+- **Semantic Drift**: Track meaning changes over time
+- **Graph Queries**: Traverse the lexical evolution graph
+
+## Authentication
+
+API key authentication via `X-API-Key` header (when enabled in production).
+
+## Rate Limiting
+
+- Default: 100 requests per minute
+- Configurable per environment
+
+## Response Format
+
+All responses are JSON with consistent error handling:
+
+```json
+{
+  "data": {...},
+  "meta": {"request_id": "...", "timestamp": "..."}
+}
+```
+
+## SDKs
+
+- Python: `pip install linguistic-stratigraphy`
+
+## Support
+
+- Documentation: https://linguistic-stratigraphy.readthedocs.io
+- Issues: https://github.com/linguistic-stratigraphy/linguistic-stratigraphy/issues
     """,
     version=settings.error_tracking.app_version,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    openapi_tags=tags_metadata,
+    contact={
+        "name": "Linguistic Stratigraphy Team",
+        "url": "https://github.com/linguistic-stratigraphy/linguistic-stratigraphy",
+        "email": "support@linguistic-stratigraphy.org",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    servers=[
+        {"url": "/", "description": "Current server"},
+        {"url": "http://localhost:8000", "description": "Local development"},
+    ],
 )
 
 # CORS configuration
