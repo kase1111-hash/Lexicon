@@ -6,7 +6,7 @@ Foundation & Planning
  Initialize version control (Git)
 ✅ Set up project structure (src/, tests/, docs/)
 ✅ Define coding conventions & style guide
- Create dependency manifest (package.json, requirements.txt)
+✅ Create dependency manifest (package.json, requirements.txt)
  Configure environment management (Docker, venv, etc.)
  Write initial README.md
 Core Implementation
