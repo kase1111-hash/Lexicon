@@ -3,7 +3,7 @@
 
 .PHONY: help install install-dev test lint format type-check security-check \
         docker-up docker-down docker-build docker-logs clean pre-commit \
-        build dist publish version-check release-check
+        build dist publish version-check release-check package-all docker-image
 
 # Default target
 help:
@@ -35,8 +35,11 @@ help:
 	@echo "  make db-migrate    Run database migrations"
 	@echo ""
 	@echo "Build & Release:"
-	@echo "  make build         Build the package"
-	@echo "  make dist          Create distribution packages"
+	@echo "  make build         Build wheel package"
+	@echo "  make dist          Create wheel and source distribution"
+	@echo "  make docker-image  Build Docker image"
+	@echo "  make package-zip   Create zip archive"
+	@echo "  make package-all   Build all distributable packages"
 	@echo "  make release-check Run all checks before release"
 	@echo "  make publish       Publish to PyPI (requires credentials)"
 	@echo ""
@@ -194,3 +197,26 @@ check: lint type-check security-check
 
 all: clean install-dev check test build
 	@echo "Full build complete!"
+
+# =============================================================================
+# Package Distribution
+# =============================================================================
+
+docker-image:
+	docker build -t linguistic-stratigraphy:$$(python -c "from src import __version__; print(__version__)") .
+	docker tag linguistic-stratigraphy:$$(python -c "from src import __version__; print(__version__)") linguistic-stratigraphy:latest
+	@echo "Docker image built successfully"
+
+package-zip:
+	@mkdir -p dist
+	zip -r dist/linguistic-stratigraphy-$$(python -c "from src import __version__; print(__version__)").zip \
+		src/ requirements.txt requirements-dev.txt pyproject.toml README.md LICENSE \
+		Makefile Dockerfile docker-compose.yml config/ scripts/ \
+		-x "*.pyc" -x "*/__pycache__/*" -x "*.egg-info/*"
+
+package-all: clean dist docker-image package-zip
+	@echo ""
+	@echo "All packages built:"
+	@ls -la dist/
+	@echo ""
+	@docker images linguistic-stratigraphy --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
