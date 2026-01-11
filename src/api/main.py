@@ -6,9 +6,24 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError as PydanticValidationError
 
+from src.exceptions import (
+    AnalysisError,
+    AuthenticationError,
+    AuthorizationError,
+    DatabaseError,
+    DuplicateError,
+    ExternalServiceError,
+    LexiconError,
+    NotFoundError,
+    PipelineError,
+    RateLimitError,
+    ValidationError,
+)
 from src.utils.db import close_db, get_db
 
 from .routes import analysis, graph, lsr
@@ -75,14 +90,146 @@ app.add_middleware(
 )
 
 
-# Exception handlers
+# =============================================================================
+# Exception Handlers
+# =============================================================================
+
+
+@app.exception_handler(NotFoundError)
+async def not_found_handler(request: Request, exc: NotFoundError) -> JSONResponse:
+    """Handle resource not found errors."""
+    logger.warning(f"Resource not found: {exc.message}")
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
+
+
+@app.exception_handler(ValidationError)
+async def validation_error_handler(request: Request, exc: ValidationError) -> JSONResponse:
+    """Handle validation errors."""
+    logger.warning(f"Validation error: {exc.message}")
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Handle FastAPI request validation errors."""
+    errors = []
+    for error in exc.errors():
+        field = ".".join(str(loc) for loc in error["loc"])
+        errors.append({"field": field, "message": error["msg"], "type": error["type"]})
+    logger.warning(f"Request validation failed: {errors}")
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "VALIDATION_ERROR",
+            "message": "Request validation failed",
+            "details": {"errors": errors},
+        },
+    )
+
+
+@app.exception_handler(PydanticValidationError)
+async def pydantic_validation_handler(
+    request: Request, exc: PydanticValidationError
+) -> JSONResponse:
+    """Handle Pydantic validation errors."""
+    errors = []
+    for error in exc.errors():
+        field = ".".join(str(loc) for loc in error["loc"])
+        errors.append({"field": field, "message": error["msg"], "type": error["type"]})
+    logger.warning(f"Pydantic validation failed: {errors}")
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "VALIDATION_ERROR",
+            "message": "Data validation failed",
+            "details": {"errors": errors},
+        },
+    )
+
+
+@app.exception_handler(DuplicateError)
+async def duplicate_handler(request: Request, exc: DuplicateError) -> JSONResponse:
+    """Handle duplicate resource errors."""
+    logger.warning(f"Duplicate resource: {exc.message}")
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
+
+
+@app.exception_handler(RateLimitError)
+async def rate_limit_handler(request: Request, exc: RateLimitError) -> JSONResponse:
+    """Handle rate limit exceeded errors."""
+    logger.warning(f"Rate limit exceeded: {request.client.host if request.client else 'unknown'}")
+    headers = {}
+    if "retry_after_seconds" in exc.details:
+        headers["Retry-After"] = str(exc.details["retry_after_seconds"])
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict(), headers=headers)
+
+
+@app.exception_handler(AuthenticationError)
+async def authentication_handler(request: Request, exc: AuthenticationError) -> JSONResponse:
+    """Handle authentication errors."""
+    logger.warning(f"Authentication failed: {request.url.path}")
+    return JSONResponse(
+        status_code=exc.http_status,
+        content=exc.to_dict(),
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+@app.exception_handler(AuthorizationError)
+async def authorization_handler(request: Request, exc: AuthorizationError) -> JSONResponse:
+    """Handle authorization errors."""
+    logger.warning(f"Authorization denied: {request.url.path}")
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
+
+
+@app.exception_handler(DatabaseError)
+async def database_error_handler(request: Request, exc: DatabaseError) -> JSONResponse:
+    """Handle database errors."""
+    logger.error(f"Database error: {exc.message}", exc_info=True)
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
+
+
+@app.exception_handler(PipelineError)
+async def pipeline_error_handler(request: Request, exc: PipelineError) -> JSONResponse:
+    """Handle pipeline processing errors."""
+    logger.error(f"Pipeline error: {exc.message}", exc_info=True)
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
+
+
+@app.exception_handler(ExternalServiceError)
+async def external_service_handler(request: Request, exc: ExternalServiceError) -> JSONResponse:
+    """Handle external service errors."""
+    logger.error(f"External service error: {exc.message}")
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
+
+
+@app.exception_handler(AnalysisError)
+async def analysis_error_handler(request: Request, exc: AnalysisError) -> JSONResponse:
+    """Handle analysis errors."""
+    logger.error(f"Analysis error: {exc.message}")
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
+
+
+@app.exception_handler(LexiconError)
+async def lexicon_error_handler(request: Request, exc: LexiconError) -> JSONResponse:
+    """Handle any other Lexicon application errors."""
+    logger.error(f"Application error: {exc.message}")
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle uncaught exceptions."""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error", "type": type(exc).__name__},
+        content={
+            "error": "INTERNAL_ERROR",
+            "message": "An unexpected error occurred",
+            "details": {"type": type(exc).__name__},
+        },
     )
 
 

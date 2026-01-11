@@ -11,9 +11,9 @@ Foundation & Planning
 ✅ Write initial README.md
 Core Implementation
 ✅ Implement core logic per spec
- Refactor for reusable components (DRY)
- Add input validation & sanitation
- Implement error handling
+✅ Refactor for reusable components (DRY)
+✅ Add input validation & sanitation
+✅ Implement error handling
  Add general logging
  Add error logging (Sentry, ELK, etc.)
  Secure configuration (.env or secrets manager)
