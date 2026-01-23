@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/kase1111-hash/Lexicon/tree/main/docs
+    about: Check the documentation for answers to common questions
+  - name: Security Vulnerabilities
+    url: https://github.com/kase1111-hash/Lexicon/security/advisories/new
+    about: Report security vulnerabilities privately (do not open a public issue)
