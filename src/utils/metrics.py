@@ -20,11 +20,15 @@ Usage:
     output = metrics.export_prometheus()
 """
 
+import functools
 import threading
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
+
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 @dataclass
@@ -280,14 +284,15 @@ class Timer:
         self.collector.observe_histogram(self.metric_name, duration, self.labels)
 
 
-def timed(metric_name: str, labels: dict[str, str] | None = None):
+def timed(metric_name: str, labels: dict[str, str] | None = None) -> Callable[[F], F]:
     """Decorator for timing function execution."""
 
-    def decorator(func):
-        def wrapper(*args, **kwargs):
+    def decorator(func: F) -> F:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             with Timer(metric_name, labels):
                 return func(*args, **kwargs)
 
-        return wrapper
+        return wrapper  # type: ignore[return-value]
 
     return decorator

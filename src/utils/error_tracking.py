@@ -200,8 +200,8 @@ class SentryIntegration:
             import sentry_sdk
 
             sentry_sdk.set_user({"id": user_id, "email": email, **extra})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to set Sentry user context: {e}")
 
     @classmethod
     def add_breadcrumb(
@@ -221,8 +221,8 @@ class SentryIntegration:
             sentry_sdk.add_breadcrumb(
                 message=message, category=category, level=level, data=data
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to add Sentry breadcrumb: {e}")
 
 
 # =============================================================================
@@ -442,11 +442,25 @@ class ErrorNotifier:
     rate limiting to prevent notification storms.
     """
 
-    _handlers: list[Callable[[Exception, dict], None]] = []
+    _handlers: list[Callable[[Exception, dict], None]] | None = None
     _rate_limit_window: float = 60.0  # seconds
     _rate_limit_count: int = 10  # max notifications per window
-    _recent_errors: list[float] = []
+    _recent_errors: list[float] | None = None
     _lock = threading.Lock()
+
+    @classmethod
+    def _get_handlers(cls) -> list[Callable[[Exception, dict], None]]:
+        """Get the handlers list, initializing if needed."""
+        if cls._handlers is None:
+            cls._handlers = []
+        return cls._handlers
+
+    @classmethod
+    def _get_recent_errors(cls) -> list[float]:
+        """Get the recent errors list, initializing if needed."""
+        if cls._recent_errors is None:
+            cls._recent_errors = []
+        return cls._recent_errors
 
     @classmethod
     def register_handler(cls, handler: Callable[[Exception, dict], None]) -> None:
@@ -456,7 +470,7 @@ class ErrorNotifier:
         Args:
             handler: Callable that takes (exception, context_dict).
         """
-        cls._handlers.append(handler)
+        cls._get_handlers().append(handler)
 
     @classmethod
     def notify(cls, error: Exception, **context: Any) -> None:
@@ -478,7 +492,7 @@ class ErrorNotifier:
         context.setdefault("error_type", type(error).__name__)
         context.setdefault("error_message", str(error))
 
-        for handler in cls._handlers:
+        for handler in cls._get_handlers():
             try:
                 handler(error, context)
             except Exception as e:
@@ -490,9 +504,10 @@ class ErrorNotifier:
         now = datetime.now(UTC).timestamp()
 
         with cls._lock:
+            recent_errors = cls._get_recent_errors()
             # Remove old entries
             cls._recent_errors = [
-                t for t in cls._recent_errors if now - t < cls._rate_limit_window
+                t for t in recent_errors if now - t < cls._rate_limit_window
             ]
 
             if len(cls._recent_errors) >= cls._rate_limit_count:

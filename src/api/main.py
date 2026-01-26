@@ -397,7 +397,7 @@ async def health() -> dict:
 
 
 @app.get("/metrics", tags=["Monitoring"])
-async def get_metrics():
+async def get_metrics() -> "PlainTextResponse":
     """
     Prometheus-compatible metrics endpoint.
 

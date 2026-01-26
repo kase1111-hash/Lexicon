@@ -8,6 +8,7 @@ Provides:
 - Sensitive value masking in logs
 """
 
+import logging
 import os
 import re
 from functools import lru_cache
@@ -16,6 +17,8 @@ from typing import Any, Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class SecretsManagerConfig(BaseSettings):
@@ -316,9 +319,9 @@ def _load_aws_secrets(config: SecretsManagerConfig) -> dict[str, Any]:
         if "SecretString" in response:
             return json.loads(response["SecretString"])
     except ImportError:
-        pass  # boto3 not installed
-    except Exception:
-        pass  # Failed to load from AWS
+        logger.debug("boto3 not installed, skipping AWS Secrets Manager")
+    except Exception as e:
+        logger.warning(f"Failed to load secrets from AWS Secrets Manager: {e}")
 
     return {}
 
@@ -340,9 +343,9 @@ def _load_vault_secrets(config: SecretsManagerConfig) -> dict[str, Any]:
             secret = client.secrets.kv.v2.read_secret_version(path=config.vault_path)
             return secret.get("data", {}).get("data", {})
     except ImportError:
-        pass  # hvac not installed
-    except Exception:
-        pass  # Failed to load from Vault
+        logger.debug("hvac not installed, skipping HashiCorp Vault")
+    except Exception as e:
+        logger.warning(f"Failed to load secrets from HashiCorp Vault: {e}")
 
     return {}
 
@@ -381,9 +384,9 @@ def _load_gcp_secrets(config: SecretsManagerConfig) -> dict[str, Any]:
 
         return secrets
     except ImportError:
-        pass  # google-cloud-secret-manager not installed
-    except Exception:
-        pass  # Failed to load from GCP
+        logger.debug("google-cloud-secret-manager not installed, skipping GCP Secret Manager")
+    except Exception as e:
+        logger.warning(f"Failed to load secrets from GCP Secret Manager: {e}")
 
     return {}
 

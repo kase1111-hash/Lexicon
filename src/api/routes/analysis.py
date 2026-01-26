@@ -178,8 +178,8 @@ async def compare_concept(
     concept = sanitize_string(concept, max_length=100)
 
     # Parse and validate language codes
-    language_list = [sanitize_iso_code(l.strip()) for l in languages.split(",")]
-    language_list = [l for l in language_list if l]  # Remove empty
+    language_list = [sanitize_iso_code(lang.strip()) for lang in languages.split(",")]
+    language_list = [lang for lang in language_list if lang]  # Remove empty
 
     if not concept:
         raise ValidationError(message="Concept is required", field="concept")

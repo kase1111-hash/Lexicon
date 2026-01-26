@@ -152,16 +152,24 @@ def merge_dicts_deep(base: dict[str, Any], override: dict[str, Any]) -> dict[str
 
 class Singleton:
     """
-    Singleton metaclass for creating singleton instances.
+    Singleton base class for creating singleton instances.
 
     Usage:
-        class MyClass(metaclass=Singleton):
+        class MyClass(Singleton):
             pass
     """
 
-    _instances: dict[type, Any] = {}
+    _instances: dict[type, Any] | None = None
+
+    @classmethod
+    def _get_instances(cls) -> dict[type, Any]:
+        """Get the instances dict, initializing if needed."""
+        if Singleton._instances is None:
+            Singleton._instances = {}
+        return Singleton._instances
 
     def __new__(cls, *args: Any, **kwargs: Any) -> Any:
-        if cls not in cls._instances:
-            cls._instances[cls] = super().__new__(cls)
-        return cls._instances[cls]
+        instances = cls._get_instances()
+        if cls not in instances:
+            instances[cls] = super().__new__(cls)
+        return instances[cls]
