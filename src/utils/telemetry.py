@@ -21,8 +21,11 @@ import contextvars
 import functools
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, TypeVar
+
+F = TypeVar("F", bound=Callable[..., Any])
 
 # Context variable for current span
 _current_span: contextvars.ContextVar["Span | None"] = contextvars.ContextVar(
@@ -216,14 +219,14 @@ tracer = Tracer()
 def traced(
     name: str | None = None,
     attributes: dict[str, Any] | None = None,
-) -> Callable:
+) -> Callable[[F], F]:
     """Decorator to trace a function."""
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: F) -> F:
         span_name = name or f"{func.__module__}.{func.__name__}"
 
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             with tracer.start_span(span_name, attributes) as span:
                 span.set_attribute("function.name", func.__name__)
                 span.set_attribute("function.module", func.__module__)
@@ -235,7 +238,7 @@ def traced(
                     raise
 
         @functools.wraps(func)
-        async def async_wrapper(*args, **kwargs):
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             with tracer.start_span(span_name, attributes) as span:
                 span.set_attribute("function.name", func.__name__)
                 span.set_attribute("function.module", func.__module__)
@@ -249,8 +252,8 @@ def traced(
         import asyncio
 
         if asyncio.iscoroutinefunction(func):
-            return async_wrapper
-        return wrapper
+            return async_wrapper  # type: ignore[return-value]
+        return wrapper  # type: ignore[return-value]
 
     return decorator
 

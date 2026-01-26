@@ -54,6 +54,7 @@ class DatabaseManager:
         self._milvus_client: Any = None
 
         self._connected = False
+        self._connection_errors: dict[str, str] = {}
 
     async def connect_all(self) -> None:
         """Connect to all database systems."""
@@ -65,8 +66,12 @@ class DatabaseManager:
         self._connected = True
         logger.info("Connected to all databases")
 
-    async def connect_neo4j(self) -> None:
-        """Connect to Neo4j graph database."""
+    async def connect_neo4j(self) -> bool:
+        """Connect to Neo4j graph database.
+
+        Returns:
+            True if connection succeeded, False otherwise.
+        """
         try:
             from neo4j import AsyncGraphDatabase
 
@@ -78,13 +83,24 @@ class DatabaseManager:
             async with self._neo4j_driver.session() as session:
                 await session.run("RETURN 1")
             logger.info("Connected to Neo4j")
+            return True
         except ImportError:
-            logger.warning("neo4j package not installed, Neo4j connection disabled")
+            msg = "neo4j package not installed"
+            logger.warning(f"{msg}, Neo4j connection disabled")
+            self._connection_errors["neo4j"] = msg
+            return False
         except Exception as e:
-            logger.error(f"Failed to connect to Neo4j: {e}")
+            msg = str(e)
+            logger.error(f"Failed to connect to Neo4j: {msg}")
+            self._connection_errors["neo4j"] = msg
+            return False
 
-    async def connect_postgres(self) -> None:
-        """Connect to PostgreSQL database."""
+    async def connect_postgres(self) -> bool:
+        """Connect to PostgreSQL database.
+
+        Returns:
+            True if connection succeeded, False otherwise.
+        """
         try:
             import asyncpg
 
@@ -94,13 +110,24 @@ class DatabaseManager:
                 max_size=20,
             )
             logger.info("Connected to PostgreSQL")
+            return True
         except ImportError:
-            logger.warning("asyncpg package not installed, PostgreSQL connection disabled")
+            msg = "asyncpg package not installed"
+            logger.warning(f"{msg}, PostgreSQL connection disabled")
+            self._connection_errors["postgres"] = msg
+            return False
         except Exception as e:
-            logger.error(f"Failed to connect to PostgreSQL: {e}")
+            msg = str(e)
+            logger.error(f"Failed to connect to PostgreSQL: {msg}")
+            self._connection_errors["postgres"] = msg
+            return False
 
-    async def connect_elasticsearch(self) -> None:
-        """Connect to Elasticsearch."""
+    async def connect_elasticsearch(self) -> bool:
+        """Connect to Elasticsearch.
+
+        Returns:
+            True if connection succeeded, False otherwise.
+        """
         try:
             from elasticsearch import AsyncElasticsearch
 
@@ -108,13 +135,24 @@ class DatabaseManager:
             # Verify connection
             await self._elasticsearch_client.info()
             logger.info("Connected to Elasticsearch")
+            return True
         except ImportError:
-            logger.warning("elasticsearch package not installed, Elasticsearch connection disabled")
+            msg = "elasticsearch package not installed"
+            logger.warning(f"{msg}, Elasticsearch connection disabled")
+            self._connection_errors["elasticsearch"] = msg
+            return False
         except Exception as e:
-            logger.error(f"Failed to connect to Elasticsearch: {e}")
+            msg = str(e)
+            logger.error(f"Failed to connect to Elasticsearch: {msg}")
+            self._connection_errors["elasticsearch"] = msg
+            return False
 
-    async def connect_redis(self) -> None:
-        """Connect to Redis."""
+    async def connect_redis(self) -> bool:
+        """Connect to Redis.
+
+        Returns:
+            True if connection succeeded, False otherwise.
+        """
         try:
             import redis.asyncio as redis
 
@@ -122,13 +160,24 @@ class DatabaseManager:
             # Verify connection
             await self._redis_client.ping()
             logger.info("Connected to Redis")
+            return True
         except ImportError:
-            logger.warning("redis package not installed, Redis connection disabled")
+            msg = "redis package not installed"
+            logger.warning(f"{msg}, Redis connection disabled")
+            self._connection_errors["redis"] = msg
+            return False
         except Exception as e:
-            logger.error(f"Failed to connect to Redis: {e}")
+            msg = str(e)
+            logger.error(f"Failed to connect to Redis: {msg}")
+            self._connection_errors["redis"] = msg
+            return False
 
-    async def connect_milvus(self) -> None:
-        """Connect to Milvus vector database."""
+    async def connect_milvus(self) -> bool:
+        """Connect to Milvus vector database.
+
+        Returns:
+            True if connection succeeded, False otherwise.
+        """
         try:
             from pymilvus import connections
 
@@ -138,10 +187,17 @@ class DatabaseManager:
                 port=self.config.milvus_port,
             )
             logger.info("Connected to Milvus")
+            return True
         except ImportError:
-            logger.warning("pymilvus package not installed, Milvus connection disabled")
+            msg = "pymilvus package not installed"
+            logger.warning(f"{msg}, Milvus connection disabled")
+            self._connection_errors["milvus"] = msg
+            return False
         except Exception as e:
-            logger.error(f"Failed to connect to Milvus: {e}")
+            msg = str(e)
+            logger.error(f"Failed to connect to Milvus: {msg}")
+            self._connection_errors["milvus"] = msg
+            return False
 
     async def close_all(self) -> None:
         """Close all database connections."""
@@ -168,7 +224,45 @@ class DatabaseManager:
             logger.info("Closed Milvus connection")
 
         self._connected = False
+        self._connection_errors.clear()
         logger.info("Closed all database connections")
+
+    def get_connection_status(self) -> dict[str, dict[str, Any]]:
+        """Get the status of all database connections.
+
+        Returns:
+            Dictionary with connection status for each database.
+        """
+        return {
+            "neo4j": {
+                "connected": self._neo4j_driver is not None,
+                "error": self._connection_errors.get("neo4j"),
+            },
+            "postgres": {
+                "connected": self._postgres_pool is not None,
+                "error": self._connection_errors.get("postgres"),
+            },
+            "elasticsearch": {
+                "connected": self._elasticsearch_client is not None,
+                "error": self._connection_errors.get("elasticsearch"),
+            },
+            "redis": {
+                "connected": self._redis_client is not None,
+                "error": self._connection_errors.get("redis"),
+            },
+            "milvus": {
+                "connected": self._milvus_client is not None,
+                "error": self._connection_errors.get("milvus"),
+            },
+        }
+
+    def get_connection_errors(self) -> dict[str, str]:
+        """Get all connection errors.
+
+        Returns:
+            Dictionary mapping database name to error message.
+        """
+        return self._connection_errors.copy()
 
     @asynccontextmanager
     async def neo4j_session(self) -> AsyncGenerator[Any, None]:
