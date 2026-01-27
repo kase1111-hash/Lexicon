@@ -28,7 +28,7 @@ from src.utils.db import close_db, get_db
 from src.utils.error_tracking import capture_error, init_error_tracking
 from src.utils.logging import get_logger, setup_logging
 
-from .middleware import PerformanceLoggingMiddleware, RequestLoggingMiddleware
+from .middleware import APIKeyAuthMiddleware, PerformanceLoggingMiddleware, RequestLoggingMiddleware
 from .routes import analysis, graph, lsr
 
 
@@ -183,6 +183,15 @@ app.add_middleware(
     allow_credentials=settings.api.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# API key authentication middleware
+api_key = settings.api.api_key.get_secret_value() if settings.api.api_key else None
+app.add_middleware(
+    APIKeyAuthMiddleware,
+    api_key=api_key,
+    header_name=settings.api.api_key_header,
+    enabled=api_key is not None,
 )
 
 # Request logging middleware
