@@ -23,6 +23,14 @@ services:
       retries: 5
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 3G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
 
   # Relational Database
   postgres:
@@ -44,6 +52,14 @@ services:
       retries: 5
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
   # Full-text Search
   elasticsearch:
@@ -68,6 +84,14 @@ services:
       retries: 5
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
 
   # Cache
   redis:
@@ -85,6 +109,14 @@ services:
       retries: 5
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
 
   # Vector Database
   milvus:
@@ -103,6 +135,14 @@ services:
       - minio
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
 
   # Milvus dependencies
   etcd:
@@ -118,6 +158,14 @@ services:
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
 
   minio:
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z
@@ -138,6 +186,14 @@ services:
       retries: 3
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
   # Workflow Orchestration
   airflow:
@@ -163,6 +219,14 @@ services:
                airflow webserver & airflow scheduler"
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   # API Service
   api:
@@ -197,6 +261,14 @@ services:
     networks:
       - ls-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
 volumes:
   neo4j_data:
