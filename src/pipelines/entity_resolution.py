@@ -56,6 +56,10 @@ class EntityResolver:
     4. Merge Logic
     """
 
+    # Separator for form:language index keys
+    # Using "||" because it won't appear in normalized word forms
+    INDEX_KEY_SEPARATOR = "||"
+
     def __init__(
         self,
         auto_merge_threshold: float = 0.95,
@@ -90,7 +94,7 @@ class EntityResolver:
         """Rebuild the form index from the LSR store."""
         self._form_index.clear()
         for lsr_id, lsr in self._lsr_store.items():
-            key = f"{lsr.form_normalized}:{lsr.language_code}"
+            key = f"{lsr.form_normalized}{self.INDEX_KEY_SEPARATOR}{lsr.language_code}"
             if key not in self._form_index:
                 self._form_index[key] = []
             self._form_index[key].append(lsr_id)
@@ -162,13 +166,13 @@ class EntityResolver:
         language_code = entry.language_code or entry.language[:3].lower()
 
         # Strategy 1: Exact match
-        exact_key = f"{form_normalized}:{language_code}"
+        exact_key = f"{form_normalized}{self.INDEX_KEY_SEPARATOR}{language_code}"
         if exact_key in self._form_index:
             candidates.update(self._form_index[exact_key])
 
         # Strategy 2: Fuzzy matching on same language
         for key, ids in self._form_index.items():
-            stored_form, stored_lang = key.rsplit(":", 1)
+            stored_form, stored_lang = key.rsplit(self.INDEX_KEY_SEPARATOR, 1)
             if stored_lang != language_code:
                 continue
             distance = PhoneticUtils.levenshtein_distance(form_normalized, stored_form)
