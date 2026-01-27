@@ -23,6 +23,14 @@ services:
       retries: 5
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 3G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
 
   # Relational Database
   postgres:
@@ -44,6 +52,14 @@ services:
       retries: 5
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
   # Full-text Search
   elasticsearch:
@@ -51,7 +67,10 @@ services:
     container_name: ls-elasticsearch
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD is required}
       - "ES_JAVA_OPTS=-Xms512m -Xmx1g"
     ports:
       - "9200:9200"
@@ -59,28 +78,45 @@ services:
     volumes:
       - es_data:/usr/share/elasticsearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f -u elastic:${ELASTICSEARCH_PASSWORD} http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
 
   # Cache
   redis:
     image: redis:7-alpine
     container_name: ls-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
 
   # Vector Database
   milvus:
@@ -99,6 +135,14 @@ services:
       - minio
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
 
   # Milvus dependencies
   etcd:
@@ -114,6 +158,14 @@ services:
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
 
   minio:
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z
@@ -134,6 +186,14 @@ services:
       retries: 3
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
   # Workflow Orchestration
   airflow:
@@ -159,6 +219,14 @@ services:
                airflow webserver & airflow scheduler"
     networks:
       - ls-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   # API Service
   api:
@@ -171,8 +239,8 @@ services:
       - NEO4J_USER=${NEO4J_USER:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}
       - POSTGRES_URI=postgresql://${POSTGRES_USER:-ls_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres/${POSTGRES_DB:-linguistic_stratigraphy}
-      - ELASTICSEARCH_URI=http://elasticsearch:9200
-      - REDIS_URI=redis://redis:6379
+      - ELASTICSEARCH_URI=http://elastic:${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD is required}@elasticsearch:9200
+      - REDIS_URI=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
       - MILVUS_HOST=milvus
       - MILVUS_PORT=19530
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -193,6 +261,14 @@ services:
     networks:
       - ls-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
 volumes:
   neo4j_data:

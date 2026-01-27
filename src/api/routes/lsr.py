@@ -9,6 +9,14 @@ from src.exceptions import InvalidDateRangeError, LSRNotFoundError
 from src.models import ErrorResponse
 from src.models.lsr import LSR
 from src.repositories.lsr_repository import LSRRepository
+from src.utils.cache import (
+    LSR_CACHE_TTL,
+    SEARCH_CACHE_TTL,
+    get_cache,
+    invalidate_lsr_cache,
+    invalidate_search_cache,
+    make_cache_key,
+)
 from src.utils.db import DatabaseManager, get_db
 from src.utils.validation import (
     LSRCreateRequest,
@@ -42,9 +50,21 @@ async def get_lsr(
     Returns the complete Lexical State Record including all fields,
     attestations, and relationship IDs.
     """
+    # Check cache first
+    cache = await get_cache()
+    cache_key = make_cache_key("lsr", str(lsr_id))
+    cached = await cache.get(cache_key)
+    if cached:
+        logger.debug(f"Cache hit for LSR: {lsr_id}")
+        return cached
+
     logger.info(f"Fetching LSR: {lsr_id}")
     lsr = await repo.get_by_id(lsr_id)
-    return {"data": lsr.model_dump(mode="json")}
+    result = {"data": lsr.model_dump(mode="json")}
+
+    # Cache the result
+    await cache.set(cache_key, result, LSR_CACHE_TTL)
+    return result
 
 
 @router.get("/search")
@@ -86,6 +106,22 @@ async def search_lsr(
 
     logger.info(f"Searching LSRs: form={form}, language={language}, dates={date_start}-{date_end}")
 
+    # Check cache first
+    cache = await get_cache()
+    cache_key = make_cache_key(
+        "search",
+        form=form,
+        language=language,
+        date_start=date_start,
+        date_end=date_end,
+        limit=limit,
+        offset=offset,
+    )
+    cached = await cache.get(cache_key)
+    if cached:
+        logger.debug(f"Cache hit for search: {cache_key}")
+        return cached
+
     # Perform search
     results, total = await repo.search(
         form=form,
@@ -96,7 +132,7 @@ async def search_lsr(
         offset=offset,
     )
 
-    return {
+    response = {
         "results": [lsr.model_dump(mode="json") for lsr in results],
         "total": total,
         "limit": limit,
@@ -109,6 +145,10 @@ async def search_lsr(
             "semantic_field": semantic_field,
         },
     }
+
+    # Cache the result
+    await cache.set(cache_key, response, SEARCH_CACHE_TTL)
+    return response
 
 
 @router.post(
@@ -141,6 +181,9 @@ async def create_lsr(
     # Persist to database
     created_lsr = await repo.create(lsr)
 
+    # Invalidate search cache since results may have changed
+    await invalidate_search_cache()
+
     return {
         "message": "LSR created successfully",
         "data": created_lsr.model_dump(mode="json"),
@@ -162,6 +205,10 @@ async def delete_lsr(
     """
     logger.info(f"Deleting LSR: {lsr_id}")
     await repo.delete(lsr_id)
+
+    # Invalidate caches
+    await invalidate_lsr_cache(str(lsr_id))
+
     return {"message": f"LSR {lsr_id} deleted successfully"}
 
 

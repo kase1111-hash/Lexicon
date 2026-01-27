@@ -1,15 +1,29 @@
-"""FastAPI middleware for logging and request tracking."""
+"""FastAPI middleware for logging, authentication, and request tracking."""
 
+import secrets
 import time
 from collections.abc import Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 from src.utils.logging import clear_request_id, get_logger, set_request_id
 
 
 logger = get_logger(__name__)
+
+
+# Paths that don't require authentication
+PUBLIC_PATHS = {
+    "/",
+    "/health",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/metrics",
+    "/metrics/json",
+}
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -115,3 +129,99 @@ class PerformanceLoggingMiddleware(BaseHTTPMiddleware):
             )
 
         return response
+
+
+class APIKeyAuthMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware for API key authentication.
+
+    Validates the X-API-Key header against configured API keys.
+    Requests to public paths (health, docs, etc.) are allowed without authentication.
+    """
+
+    def __init__(
+        self,
+        app,
+        api_key: str | None = None,
+        header_name: str = "X-API-Key",
+        enabled: bool = True,
+    ):
+        """
+        Initialize API key authentication middleware.
+
+        Args:
+            app: FastAPI application
+            api_key: The valid API key (if None, authentication is disabled)
+            header_name: Header name to check for API key
+            enabled: Whether authentication is enabled
+        """
+        super().__init__(app)
+        self.api_key = api_key
+        self.header_name = header_name
+        self.enabled = enabled and api_key is not None
+
+    def _is_public_path(self, path: str) -> bool:
+        """Check if the path is public (doesn't require authentication)."""
+        # Exact match
+        if path in PUBLIC_PATHS:
+            return True
+
+        # Check path prefixes for static files and docs
+        public_prefixes = ("/docs", "/redoc", "/openapi")
+        return path.startswith(public_prefixes)
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """Process request with API key authentication."""
+        # Skip authentication if disabled
+        if not self.enabled:
+            return await call_next(request)
+
+        # Skip authentication for public paths
+        if self._is_public_path(request.url.path):
+            return await call_next(request)
+
+        # Get API key from header
+        provided_key = request.headers.get(self.header_name)
+
+        # Check if API key is provided
+        if not provided_key:
+            logger.warning(
+                f"Missing API key for {request.method} {request.url.path}",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "client_ip": request.client.host if request.client else None,
+                },
+            )
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "AUTHENTICATION_ERROR",
+                    "message": "API key required",
+                    "details": {"header": self.header_name},
+                },
+                headers={"WWW-Authenticate": f'ApiKey header="{self.header_name}"'},
+            )
+
+        # Validate API key using constant-time comparison to prevent timing attacks
+        if not secrets.compare_digest(provided_key, self.api_key):
+            logger.warning(
+                f"Invalid API key for {request.method} {request.url.path}",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "client_ip": request.client.host if request.client else None,
+                },
+            )
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "AUTHENTICATION_ERROR",
+                    "message": "Invalid API key",
+                    "details": {},
+                },
+                headers={"WWW-Authenticate": f'ApiKey header="{self.header_name}"'},
+            )
+
+        # API key is valid, proceed with request
+        return await call_next(request)
