@@ -110,8 +110,8 @@ class APIConfig(BaseSettings):
     cors_origins: str = "*"
     cors_allow_credentials: bool = True
 
-    # Rate limiting
-    rate_limit_enabled: bool = False
+    # Rate limiting (enabled by default for security)
+    rate_limit_enabled: bool = True
     rate_limit_requests: int = 100
     rate_limit_window_seconds: int = 60
 
@@ -256,6 +256,8 @@ class Settings(BaseSettings):
                 errors.append("DEBUG must be False in production")
             if self.api.cors_origins == "*":
                 errors.append("CORS_ORIGINS should not be '*' in production")
+            if not self.api.rate_limit_enabled:
+                errors.append("RATE_LIMIT_ENABLED should be True in production")
 
         return errors
 

@@ -186,6 +186,8 @@ class DatabaseManager:
                 host=self.config.milvus_host,
                 port=self.config.milvus_port,
             )
+            # Store connection alias to track connection state
+            self._milvus_client = "default"
             logger.info("Connected to Milvus")
             return True
         except ImportError:
@@ -220,7 +222,8 @@ class DatabaseManager:
         if self._milvus_client:
             from pymilvus import connections
 
-            connections.disconnect("default")
+            connections.disconnect(self._milvus_client)
+            self._milvus_client = None
             logger.info("Closed Milvus connection")
 
         self._connected = False
@@ -293,6 +296,13 @@ class DatabaseManager:
         if not self._redis_client:
             raise RuntimeError("Redis not connected")
         return self._redis_client
+
+    @property
+    def milvus_alias(self) -> str:
+        """Get the Milvus connection alias."""
+        if not self._milvus_client:
+            raise RuntimeError("Milvus not connected")
+        return self._milvus_client
 
     async def __aenter__(self) -> "DatabaseManager":
         """Async context manager entry."""

@@ -3,10 +3,13 @@
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from src.exceptions import InvalidDateRangeError, LSRNotFoundError
 from src.models import ErrorResponse
+from src.models.lsr import LSR
+from src.repositories.lsr_repository import LSRRepository
+from src.utils.db import DatabaseManager, get_db
 from src.utils.validation import (
     LSRCreateRequest,
     sanitize_iso_code,
@@ -19,31 +22,43 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def get_lsr_repository() -> LSRRepository:
+    """Dependency to get the LSR repository."""
+    db = await get_db()
+    return LSRRepository(db)
+
+
 @router.get(
     "/{lsr_id}",
     responses={404: {"model": ErrorResponse}},
 )
-async def get_lsr(lsr_id: UUID) -> dict:
+async def get_lsr(
+    lsr_id: UUID,
+    repo: LSRRepository = Depends(get_lsr_repository),
+) -> dict:
     """
     Get a full LSR record by ID.
 
     Returns the complete Lexical State Record including all fields,
     attestations, and relationship IDs.
     """
-    # TODO: Implement LSR retrieval from database
     logger.info(f"Fetching LSR: {lsr_id}")
-    raise LSRNotFoundError(lsr_id=str(lsr_id))
+    lsr = await repo.get_by_id(lsr_id)
+    return {"data": lsr.model_dump(mode="json")}
 
 
 @router.get("/search")
 async def search_lsr(
     form: str | None = Query(None, description="Form to search (exact or fuzzy)", max_length=200),
     language: str | None = Query(None, description="ISO 639-3 language code", max_length=10),
-    date_start: int | None = Query(None, description="Start year (negative for BCE)", ge=-10000, le=3000),
-    date_end: int | None = Query(None, description="End year", ge=-10000, le=3000),
+    date_start: int | None = Query(
+        None, description="Start year (negative for BCE)", ge=-10000, le=2100
+    ),
+    date_end: int | None = Query(None, description="End year", ge=-10000, le=2100),
     semantic_field: str | None = Query(None, description="WordNet synset ID filter", max_length=50),
     limit: int = Query(20, ge=1, le=100, description="Maximum results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
+    repo: LSRRepository = Depends(get_lsr_repository),
 ) -> dict:
     """
     Search for LSRs matching criteria.
@@ -71,10 +86,19 @@ async def search_lsr(
 
     logger.info(f"Searching LSRs: form={form}, language={language}, dates={date_start}-{date_end}")
 
-    # TODO: Implement actual search
+    # Perform search
+    results, total = await repo.search(
+        form=form,
+        language=language,
+        date_start=date_start,
+        date_end=date_end,
+        limit=limit,
+        offset=offset,
+    )
+
     return {
-        "results": [],
-        "total": 0,
+        "results": [lsr.model_dump(mode="json") for lsr in results],
+        "total": total,
         "limit": limit,
         "offset": offset,
         "filters": {
@@ -92,7 +116,10 @@ async def search_lsr(
     status_code=201,
     responses={400: {"model": ErrorResponse}},
 )
-async def create_lsr(request: LSRCreateRequest) -> dict:
+async def create_lsr(
+    request: LSRCreateRequest,
+    repo: LSRRepository = Depends(get_lsr_repository),
+) -> dict:
     """
     Create a new LSR record.
 
@@ -101,18 +128,51 @@ async def create_lsr(request: LSRCreateRequest) -> dict:
     """
     logger.info(f"Creating LSR: {request.form_orthographic} ({request.language_code})")
 
-    # TODO: Implement LSR creation
+    # Create LSR from request
+    lsr = LSR(
+        form_orthographic=request.form_orthographic,
+        form_phonetic=request.form_phonetic,
+        language_code=request.language_code,
+        definition_primary=request.definition_primary,
+        date_start=request.date_start,
+        date_end=request.date_end,
+    )
+
+    # Persist to database
+    created_lsr = await repo.create(lsr)
+
     return {
-        "message": "LSR creation not yet implemented",
-        "data": request.model_dump(),
+        "message": "LSR created successfully",
+        "data": created_lsr.model_dump(mode="json"),
     }
+
+
+@router.delete(
+    "/{lsr_id}",
+    responses={404: {"model": ErrorResponse}},
+)
+async def delete_lsr(
+    lsr_id: UUID,
+    repo: LSRRepository = Depends(get_lsr_repository),
+) -> dict:
+    """
+    Delete an LSR record by ID.
+
+    This will also remove all relationships to/from this LSR.
+    """
+    logger.info(f"Deleting LSR: {lsr_id}")
+    await repo.delete(lsr_id)
+    return {"message": f"LSR {lsr_id} deleted successfully"}
 
 
 @router.get(
     "/{lsr_id}/etymology",
     responses={404: {"model": ErrorResponse}},
 )
-async def get_etymology(lsr_id: UUID) -> dict:
+async def get_etymology(
+    lsr_id: UUID,
+    repo: LSRRepository = Depends(get_lsr_repository),
+) -> dict:
     """
     Get the full etymology chain to proto-form.
 
@@ -121,7 +181,10 @@ async def get_etymology(lsr_id: UUID) -> dict:
     """
     logger.info(f"Fetching etymology for LSR: {lsr_id}")
 
-    # TODO: Implement etymology chain retrieval
+    # Verify LSR exists
+    await repo.get_by_id(lsr_id)
+
+    # TODO: Implement etymology chain retrieval via graph traversal
     return {
         "lsr_id": str(lsr_id),
         "chain": [],
@@ -137,6 +200,7 @@ async def get_etymology(lsr_id: UUID) -> dict:
 async def get_descendants(
     lsr_id: UUID,
     depth: int = Query(3, ge=1, le=10, description="Maximum depth to traverse"),
+    repo: LSRRepository = Depends(get_lsr_repository),
 ) -> dict:
     """
     Get descendant tree.
@@ -145,7 +209,10 @@ async def get_descendants(
     """
     logger.info(f"Fetching descendants for LSR: {lsr_id}, depth={depth}")
 
-    # TODO: Implement descendant tree retrieval
+    # Verify LSR exists
+    await repo.get_by_id(lsr_id)
+
+    # TODO: Implement descendant tree retrieval via graph traversal
     return {
         "lsr_id": str(lsr_id),
         "descendants": [],
@@ -157,7 +224,10 @@ async def get_descendants(
     "/{lsr_id}/cognates",
     responses={404: {"model": ErrorResponse}},
 )
-async def get_cognates(lsr_id: UUID) -> dict:
+async def get_cognates(
+    lsr_id: UUID,
+    repo: LSRRepository = Depends(get_lsr_repository),
+) -> dict:
     """
     Get all cognate LSRs across languages.
 
@@ -166,7 +236,10 @@ async def get_cognates(lsr_id: UUID) -> dict:
     """
     logger.info(f"Fetching cognates for LSR: {lsr_id}")
 
-    # TODO: Implement cognate retrieval
+    # Verify LSR exists
+    await repo.get_by_id(lsr_id)
+
+    # TODO: Implement cognate retrieval via graph traversal
     return {
         "lsr_id": str(lsr_id),
         "cognates": [],
@@ -177,7 +250,10 @@ async def get_cognates(lsr_id: UUID) -> dict:
     "/{lsr_id}/borrowings",
     responses={404: {"model": ErrorResponse}},
 )
-async def get_borrowings(lsr_id: UUID) -> dict:
+async def get_borrowings(
+    lsr_id: UUID,
+    repo: LSRRepository = Depends(get_lsr_repository),
+) -> dict:
     """
     Get borrowing relationships for an LSR.
 
@@ -186,7 +262,10 @@ async def get_borrowings(lsr_id: UUID) -> dict:
     """
     logger.info(f"Fetching borrowings for LSR: {lsr_id}")
 
-    # TODO: Implement borrowing retrieval
+    # Verify LSR exists
+    await repo.get_by_id(lsr_id)
+
+    # TODO: Implement borrowing retrieval via graph traversal
     return {
         "lsr_id": str(lsr_id),
         "borrowed_from": None,

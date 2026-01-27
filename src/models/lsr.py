@@ -36,7 +36,12 @@ class Attestation(BaseModel):
     lsr_id: UUID | None = None
     text_excerpt: str = ""
     text_source: str = ""
-    text_date: int | None = None
+    text_date: int | None = Field(
+        default=None,
+        ge=-10000,
+        le=2100,
+        description="Attestation year (negative for BCE, must be between -10000 and 2100)",
+    )
     text_date_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     page_reference: str = ""
     url: str | None = None
@@ -69,8 +74,18 @@ class LSR(BaseModel):
     language_family: str = Field(default="", description="Top-level family")
     language_branch: list[str] = Field(default_factory=list, description="Full lineage path")
     period_label: str = Field(default="", description="e.g., 'Middle English'")
-    date_start: int | None = Field(default=None, description="Start year (negative for BCE)")
-    date_end: int | None = Field(default=None, description="End year")
+    date_start: int | None = Field(
+        default=None,
+        ge=-10000,
+        le=2100,
+        description="Start year (negative for BCE, must be between -10000 and 2100)",
+    )
+    date_end: int | None = Field(
+        default=None,
+        ge=-10000,
+        le=2100,
+        description="End year (must be between -10000 and 2100)",
+    )
     date_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     date_source: DateSource = Field(default=DateSource.ATTESTED)
 
