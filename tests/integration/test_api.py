@@ -398,3 +398,315 @@ class TestRequestHeaders:
         custom_id = "test-request-123"
         response = client.get("/health", headers={"X-Request-ID": custom_id})
         assert response.status_code == 200
+
+
+class TestAPIKeyAuthentication:
+    """Tests for API key authentication middleware."""
+
+    def test_public_paths_no_auth_required(self):
+        """Test that public paths don't require authentication."""
+        public_paths = ["/", "/health", "/docs", "/redoc", "/openapi.json", "/metrics"]
+        for path in public_paths:
+            response = client.get(path)
+            # Should not get 401 for public paths
+            assert response.status_code != 401, f"Path {path} should not require auth"
+
+    def test_api_endpoints_accessible_without_key_when_disabled(self):
+        """Test API endpoints are accessible when API key auth is disabled."""
+        # By default in tests, API_KEY is not set, so auth should be disabled
+        response = client.get("/api/v1/lsr/search")
+        # Should not get 401 when auth is disabled
+        assert response.status_code != 401
+
+    def test_openapi_docs_accessible(self):
+        """Test that OpenAPI documentation is accessible."""
+        response = client.get("/openapi.json")
+        assert response.status_code == 200
+        data = response.json()
+        assert "openapi" in data
+        assert "paths" in data
+
+
+class TestLSREdgeCases:
+    """Additional edge case tests for LSR endpoints."""
+
+    def test_search_with_special_characters(self):
+        """Test search with special characters in form."""
+        response = client.get("/api/v1/lsr/search", params={"form": "test<script>"})
+        assert response.status_code == 200
+        # Form should be sanitized
+        data = response.json()
+        assert "<script>" not in data["filters"]["form"]
+
+    def test_search_with_very_long_form(self):
+        """Test search with excessively long form parameter."""
+        long_form = "a" * 500  # Exceeds 200 char limit
+        response = client.get("/api/v1/lsr/search", params={"form": long_form})
+        # Should either truncate or return validation error
+        assert response.status_code in [200, 422]
+
+    def test_search_with_empty_string_form(self):
+        """Test search with empty string form."""
+        response = client.get("/api/v1/lsr/search", params={"form": ""})
+        assert response.status_code == 200
+
+    def test_search_with_unicode_form(self):
+        """Test search with Unicode characters in form."""
+        response = client.get("/api/v1/lsr/search", params={"form": "水"})  # Chinese for water
+        assert response.status_code == 200
+        data = response.json()
+        assert data["filters"]["form"] == "水"
+
+    def test_search_date_boundary_values(self):
+        """Test search with boundary date values."""
+        # Minimum date
+        response = client.get("/api/v1/lsr/search", params={"date_start": -10000})
+        assert response.status_code == 200
+
+        # Maximum date
+        response = client.get("/api/v1/lsr/search", params={"date_end": 2100})
+        assert response.status_code == 200
+
+    def test_search_date_below_minimum(self):
+        """Test search with date below allowed minimum."""
+        response = client.get("/api/v1/lsr/search", params={"date_start": -15000})
+        assert response.status_code == 422  # Validation error
+
+    def test_search_date_above_maximum(self):
+        """Test search with date above allowed maximum."""
+        response = client.get("/api/v1/lsr/search", params={"date_end": 3000})
+        assert response.status_code == 422  # Validation error
+
+    def test_delete_lsr_not_found(self):
+        """Test deleting non-existent LSR."""
+        fake_id = str(uuid4())
+        response = client.delete(f"/api/v1/lsr/{fake_id}")
+        assert response.status_code == 404
+        data = response.json()
+        assert data["error"] == "LSR_NOT_FOUND"
+
+    def test_create_lsr_with_dates(self):
+        """Test creating LSR with date fields."""
+        response = client.post(
+            "/api/v1/lsr/",
+            json={
+                "form_orthographic": "test_dated",
+                "language_code": "eng",
+                "definition_primary": "a test word with dates",
+                "date_start": 1500,
+                "date_end": 1600,
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["data"]["date_start"] == 1500
+        assert data["data"]["date_end"] == 1600
+
+    def test_create_lsr_invalid_date_range(self):
+        """Test creating LSR with invalid date range."""
+        response = client.post(
+            "/api/v1/lsr/",
+            json={
+                "form_orthographic": "test",
+                "language_code": "eng",
+                "date_start": 1600,
+                "date_end": 1500,  # End before start
+            },
+        )
+        # Should fail validation
+        assert response.status_code in [400, 422]
+
+    def test_create_lsr_with_phonetic(self):
+        """Test creating LSR with phonetic transcription."""
+        response = client.post(
+            "/api/v1/lsr/",
+            json={
+                "form_orthographic": "water",
+                "form_phonetic": "ˈwɔːtər",
+                "language_code": "eng",
+                "definition_primary": "H2O",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["data"]["form_phonetic"] == "ˈwɔːtər"
+
+
+class TestAnalysisEdgeCases:
+    """Additional edge case tests for analysis endpoints."""
+
+    def test_date_text_empty_text(self):
+        """Test dating with empty text."""
+        response = client.post(
+            "/api/v1/analyze/date-text",
+            json={"text": "", "language": "eng"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # Should handle gracefully with low confidence
+        assert data["confidence"] == 0 or "predicted_date_range" in data
+
+    def test_date_text_very_long_text(self):
+        """Test dating with very long text."""
+        long_text = "The quick brown fox jumps over the lazy dog. " * 1000
+        response = client.post(
+            "/api/v1/analyze/date-text",
+            json={"text": long_text, "language": "eng"},
+        )
+        assert response.status_code == 200
+
+    def test_detect_anachronisms_ancient_date(self):
+        """Test anachronism detection with very old claimed date."""
+        response = client.post(
+            "/api/v1/analyze/detect-anachronisms",
+            json={
+                "text": "The farmer planted wheat in the field.",
+                "claimed_date": -5000,  # Ancient date
+                "language": "eng",
+            },
+        )
+        assert response.status_code == 200
+
+    def test_semantic_drift_with_unicode_form(self):
+        """Test semantic drift with Unicode word."""
+        response = client.get(
+            "/api/v1/analyze/semantic-drift",
+            params={"form": "café", "language": "fra"},
+        )
+        assert response.status_code == 200
+
+    def test_compare_concept_single_language(self):
+        """Test concept comparison with single language."""
+        response = client.get(
+            "/api/v1/analyze/compare-concept",
+            params={"concept": "water", "languages": "eng"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["by_language"]) == 1
+
+
+class TestGraphEdgeCases:
+    """Additional edge case tests for graph endpoints."""
+
+    def test_execute_query_empty_query(self):
+        """Test graph query with empty query string."""
+        response = client.post(
+            "/api/v1/graph/query",
+            json={"query": ""},
+        )
+        # Should fail validation
+        assert response.status_code in [400, 422]
+
+    def test_execute_query_with_parameters(self):
+        """Test graph query with parameters."""
+        response = client.post(
+            "/api/v1/graph/query",
+            json={
+                "query": "MATCH (n:LSR {language_code: $lang}) RETURN n LIMIT 10",
+                "parameters": {"lang": "eng"},
+            },
+        )
+        assert response.status_code == 200
+
+    def test_get_path_same_source_target(self):
+        """Test path finding with same source and target."""
+        lsr_id = str(uuid4())
+        response = client.get(
+            "/api/v1/graph/path",
+            params={"from_lsr": lsr_id, "to_lsr": lsr_id},
+        )
+        assert response.status_code == 200
+
+    def test_get_path_with_relationship_types(self):
+        """Test path finding with specific relationship types."""
+        from_id = str(uuid4())
+        to_id = str(uuid4())
+        response = client.get(
+            "/api/v1/graph/path",
+            params={
+                "from_lsr": from_id,
+                "to_lsr": to_id,
+                "relationship_types": "DESCENDS_FROM,BORROWED_FROM",
+            },
+        )
+        assert response.status_code == 200
+
+    def test_etymology_chain(self):
+        """Test etymology chain endpoint."""
+        lsr_id = str(uuid4())
+        response = client.get(f"/api/v1/graph/etymology/{lsr_id}")
+        assert response.status_code == 200
+        data = response.json()
+        assert "chain" in data
+        assert "depth" in data
+
+    def test_graph_cognates(self):
+        """Test cognates endpoint on graph router."""
+        lsr_id = str(uuid4())
+        response = client.get(f"/api/v1/graph/cognates/{lsr_id}")
+        assert response.status_code == 200
+        data = response.json()
+        assert "cognate_count" in data
+        assert "by_language" in data
+
+    def test_bulk_export_invalid_format(self):
+        """Test bulk export with invalid format."""
+        response = client.post(
+            "/api/v1/graph/bulk/export",
+            json={"language": "eng", "format": "invalid_format"},
+        )
+        # Should either handle gracefully or return validation error
+        assert response.status_code in [200, 400, 422]
+
+
+class TestContentTypeHandling:
+    """Tests for content type handling."""
+
+    def test_json_content_type_required(self):
+        """Test that POST endpoints require JSON content type."""
+        response = client.post(
+            "/api/v1/lsr/",
+            content="form_orthographic=test&language_code=eng",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        # Should fail with non-JSON content
+        assert response.status_code == 422
+
+    def test_json_response_content_type(self):
+        """Test that responses have correct content type."""
+        response = client.get("/health")
+        assert "application/json" in response.headers.get("content-type", "")
+
+
+class TestPaginationEdgeCases:
+    """Tests for pagination edge cases."""
+
+    def test_zero_offset(self):
+        """Test pagination with zero offset."""
+        response = client.get("/api/v1/lsr/search", params={"offset": 0})
+        assert response.status_code == 200
+
+    def test_large_offset(self):
+        """Test pagination with large offset."""
+        response = client.get("/api/v1/lsr/search", params={"offset": 10000})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["offset"] == 10000
+
+    def test_minimum_limit(self):
+        """Test pagination with minimum limit."""
+        response = client.get("/api/v1/lsr/search", params={"limit": 1})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["limit"] == 1
+
+    def test_negative_offset_rejected(self):
+        """Test that negative offset is rejected."""
+        response = client.get("/api/v1/lsr/search", params={"offset": -1})
+        assert response.status_code == 422
+
+    def test_zero_limit_rejected(self):
+        """Test that zero limit is rejected."""
+        response = client.get("/api/v1/lsr/search", params={"limit": 0})
+        assert response.status_code == 422
