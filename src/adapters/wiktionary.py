@@ -167,12 +167,15 @@ class WiktionaryAdapter(SourceAdapter):
             time.sleep(sleep_time)
         self._last_request_time = time.time()
 
-    def _fetch_word(self, word: str) -> list[RawLexicalEntry]:
+    def _fetch_word(self, word: str, max_retries: int = 3) -> list[RawLexicalEntry]:
         """
         Fetch and parse a word from Wiktionary API.
 
+        Includes retry logic for transient network failures.
+
         Args:
             word: The word to fetch.
+            max_retries: Maximum number of retry attempts.
 
         Returns:
             List of RawLexicalEntry objects.
@@ -188,9 +191,23 @@ class WiktionaryAdapter(SourceAdapter):
             "formatversion": "2",
         }
 
-        response = self._client.get(self.api_endpoint, params=params)
-        response.raise_for_status()
-        data = response.json()
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = self._client.get(self.api_endpoint, params=params)
+                response.raise_for_status()
+                data = response.json()
+                break
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as e:
+                last_error = e
+                wait = (attempt + 1) * 2  # 2s, 4s, 6s
+                logger.warning(
+                    f"Transient error fetching '{word}' (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {wait}s..."
+                )
+                time.sleep(wait)
+        else:
+            raise last_error or RuntimeError(f"Failed to fetch '{word}' after {max_retries} retries")
 
         # Extract the wikitext content
         pages = data.get("query", {}).get("pages", [])
@@ -258,6 +275,9 @@ class WiktionaryAdapter(SourceAdapter):
         """
         Parse a single language section from Wiktionary.
 
+        Handles multiple etymology sections (Etymology 1, Etymology 2, etc.)
+        and extracts structured template data before cleaning.
+
         Args:
             word: The word.
             language_name: The language name.
@@ -272,8 +292,10 @@ class WiktionaryAdapter(SourceAdapter):
         ipa_match = ipa_pattern.search(content)
         phonetic = ipa_match.group(1) if ipa_match else ""
 
-        # Extract etymology
-        etymology = self._extract_section(content, "Etymology")
+        # Extract etymology - handle multiple sections (Etymology 1, 2, etc.)
+        etymology_raw = self._extract_etymology_raw(content)
+        etymology_templates = self._extract_etymology_templates(etymology_raw) if etymology_raw else []
+        etymology = self._clean_wikitext(etymology_raw) if etymology_raw else None
 
         # Extract definitions
         definitions = self._extract_definitions(content)
@@ -284,8 +306,17 @@ class WiktionaryAdapter(SourceAdapter):
         # Extract earliest attestation date if available
         date_attested = self._extract_attestation_date(content)
 
+        # Build related_forms from etymology templates
+        related_forms = []
+        for tmpl in etymology_templates:
+            related_forms.append({
+                "type": tmpl["name"],
+                "form": tmpl.get("term", ""),
+                "language_code": tmpl.get("lang", ""),
+                "raw_template": tmpl.get("raw", ""),
+            })
+
         if not definitions:
-            # If no definitions found, still create entry with etymology
             definitions = ["(definition not extracted)"]
 
         return RawLexicalEntry(
@@ -299,27 +330,116 @@ class WiktionaryAdapter(SourceAdapter):
             definitions=definitions,
             part_of_speech=pos,
             date_attested=date_attested,
+            related_forms=related_forms,
             raw_data={
                 "source_url": f"https://en.wiktionary.org/wiki/{word}",
                 "language_section": language_name,
+                "etymology_raw": etymology_raw or "",
+                "etymology_templates": etymology_templates,
             },
         )
 
+    def _extract_etymology_raw(self, content: str) -> str | None:
+        """Extract raw etymology text, handling numbered etymologies.
+
+        Wiktionary pages may have:
+        - ===Etymology=== (single etymology)
+        - ===Etymology 1===, ===Etymology 2=== (multiple etymologies)
+
+        Returns the raw text with templates intact for later parsing.
+        """
+        # Try numbered etymologies first (Etymology 1 is most common/primary)
+        numbered_pattern = re.compile(
+            r"^===+\s*Etymology\s+1\s*===+\s*\n(.*?)(?=^===|\Z)",
+            re.MULTILINE | re.DOTALL,
+        )
+        match = numbered_pattern.search(content)
+        if match:
+            return match.group(1).strip() or None
+
+        # Fall back to single Etymology section
+        single_pattern = re.compile(
+            r"^===+\s*Etymology\s*===+\s*\n(.*?)(?=^===|\Z)",
+            re.MULTILINE | re.DOTALL,
+        )
+        match = single_pattern.search(content)
+        if match:
+            return match.group(1).strip() or None
+
+        return None
+
+    def _extract_etymology_templates(self, raw_text: str) -> list[dict]:
+        """Parse Wiktionary etymology templates from raw wikitext.
+
+        Extracts templates like:
+        - {{inh|en|enm|water}} -> inherited from Middle English "water"
+        - {{bor|en|fr|justice}} -> borrowed from French "justice"
+        - {{der|en|la|aqua}} -> derived from Latin "aqua"
+        - {{cog|de|Wasser}} -> cognate with German "Wasser"
+        - {{m|ang|wæter}} -> mention of Old English "wæter"
+
+        Returns list of dicts with keys: name, lang, term, raw.
+        """
+        templates = []
+        # Match {{name|param1|param2|...}}
+        tmpl_pattern = re.compile(r"\{\{(\w+)\|([^}]*)\}\}")
+
+        for match in tmpl_pattern.finditer(raw_text):
+            name = match.group(1).lower()
+            params = match.group(2).split("|")
+
+            # Only process etymology-relevant templates
+            if name not in ("inh", "inherited", "bor", "borrowed",
+                            "der", "derived", "cog", "cognate", "m"):
+                continue
+
+            tmpl_dict: dict[str, str] = {"name": name, "raw": match.group(0)}
+
+            if name in ("inh", "inherited", "bor", "borrowed", "der", "derived"):
+                # Format: {{inh|target_lang|source_lang|term}}
+                if len(params) >= 3:
+                    tmpl_dict["target_lang"] = params[0].strip()
+                    tmpl_dict["lang"] = params[1].strip()
+                    tmpl_dict["term"] = params[2].strip()
+                elif len(params) >= 2:
+                    tmpl_dict["lang"] = params[0].strip()
+                    tmpl_dict["term"] = params[1].strip()
+            elif name in ("cog", "cognate"):
+                # Format: {{cog|lang|term}}
+                if len(params) >= 2:
+                    tmpl_dict["lang"] = params[0].strip()
+                    tmpl_dict["term"] = params[1].strip()
+            elif name == "m":
+                # Format: {{m|lang|term}} (mention)
+                if len(params) >= 2:
+                    tmpl_dict["lang"] = params[0].strip()
+                    tmpl_dict["term"] = params[1].strip()
+
+            if "term" in tmpl_dict:
+                templates.append(tmpl_dict)
+
+        return templates
+
+    def _clean_wikitext(self, text: str) -> str | None:
+        """Clean wikitext markup, removing templates and formatting."""
+        if not text:
+            return None
+        text = re.sub(r"\{\{[^}]+\}\}", "", text)  # Remove templates
+        text = re.sub(r"\[\[([^|\]]+\|)?([^\]]+)\]\]", r"\2", text)  # Clean links
+        text = re.sub(r"'''?", "", text)  # Remove bold/italic
+        text = re.sub(r"\s+", " ", text)  # Collapse whitespace
+        text = text.strip()
+        return text if text else None
+
     def _extract_section(self, content: str, section_name: str) -> str | None:
-        """Extract content from a named section."""
+        """Extract content from a named section (cleaned of markup)."""
         pattern = re.compile(
             rf"^===+\s*{section_name}[^=]*===+\s*\n(.*?)(?=^===|\Z)",
             re.MULTILINE | re.DOTALL,
         )
         match = pattern.search(content)
         if match:
-            text = match.group(1).strip()
-            # Clean up wikitext markup
-            text = re.sub(r"\{\{[^}]+\}\}", "", text)  # Remove templates
-            text = re.sub(r"\[\[([^|\]]+\|)?([^\]]+)\]\]", r"\2", text)  # Clean links
-            text = re.sub(r"'''?", "", text)  # Remove bold/italic
-            text = text.strip()
-            return text if text else None
+            return self._clean_wikitext(match.group(1).strip())
         return None
 
     def _extract_definitions(self, content: str) -> list[str]:
