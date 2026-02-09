@@ -125,14 +125,14 @@ class TestRawEntryDataIntegrity:
     def test_raw_data_preserved(self):
         """Test that raw_data field preserves arbitrary data."""
         custom_data = {
-            "ocr_confidence": 0.95,
+            "confidence": 0.95,
             "page_number": 42,
             "nested": {"key": "value"},
         }
 
         entry = RawLexicalEntry(
-            source_name="ocr",
-            source_id="ocr-1",
+            source_name="corpus",
+            source_id="corp-integrity-1",
             form="test",
             language="English",
             raw_data=custom_data,

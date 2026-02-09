@@ -2,14 +2,13 @@
 
 ## Project Overview
 
-**Lexicon** is a computational linguistic stratigraphy system for building and maintaining a cross-linguistic lexical evolution graph. It ingests etymological data from multiple sources, constructs a unified knowledge graph, trains diachronic embeddings, and exposes analysis tools via REST/GraphQL APIs.
+**Lexicon** is a computational linguistic stratigraphy system for building and maintaining a cross-linguistic lexical evolution graph. It ingests etymological data from multiple sources, constructs a unified knowledge graph, and exposes analysis tools via REST/GraphQL APIs.
 
 **Core Capabilities:**
 - Temporal dating of historical texts by vocabulary analysis
 - Language contact detection and borrowing pattern identification
 - Semantic drift analysis tracking word meaning evolution
 - Forgery detection via anachronistic vocabulary identification
-- Phylogenetic inference for language family reconstruction
 - Etymology tracing across languages and time periods
 
 **Version:** 0.1.0 (Alpha) | **License:** MIT
@@ -22,12 +21,9 @@
 - Neo4j 5.9 - Graph database for lexical relationships
 - PostgreSQL 15 - Relational metadata storage
 - Elasticsearch 8.9 - Full-text search
-- Milvus v2.3 - Vector database for embeddings
 - Redis 7 - Caching layer
 
-**ML/NLP:** PyTorch 2.0+, Sentence Transformers, Transformers, spaCy, scikit-learn, XGBoost
-
-**Infrastructure:** Docker Compose, Kubernetes, Apache Airflow
+**Infrastructure:** Docker Compose
 
 ## Essential Commands
 
@@ -56,7 +52,7 @@ make security-check   # Bandit security scan
 
 ```
 src/
-├── adapters/         # Data source ingestion (Wiktionary, CLLD, corpus, OCR)
+├── adapters/         # Data source ingestion (Wiktionary, CLLD, corpus)
 ├── analysis/         # Analysis modules (dating, contact_detection, semantic_drift)
 ├── api/              # REST & GraphQL API
 │   ├── main.py       # FastAPI entry point
@@ -64,8 +60,7 @@ src/
 │   ├── routes/       # REST endpoints (lsr, graph, analysis)
 │   └── graphql/      # GraphQL schema & resolvers
 ├── models/           # Data models (LSR, Language, Relationships)
-├── pipelines/        # Data processing (entity_resolution, embedding, validation)
-├── training/         # ML training (embeddings, classifiers, phylogenetics)
+├── pipelines/        # Data processing (entity_resolution, validation)
 ├── repositories/     # Data access layer
 ├── utils/            # Utilities (db, cache, logging, validation)
 ├── config.py         # Configuration management
@@ -139,18 +134,15 @@ All services have resource limits configured:
 - PostgreSQL: 5432
 - Elasticsearch: 9200
 - Redis: 6379
-- Milvus: 19530
-- Airflow: 8080
 - API: 8000
 
-Start with `docker compose up -d` (requires 16GB+ RAM recommended)
+Start with `docker compose up -d`
 
 ## Configuration
 
 - Environment variables override `.env` file
 - See `.env.example` for all options
 - Production validation enabled on startup
-- Secrets support: AWS Secrets Manager, HashiCorp Vault, GCP
 
 ## Documentation
 

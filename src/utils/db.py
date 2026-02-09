@@ -26,9 +26,6 @@ class DatabaseConfig:
 
         self.redis_uri = os.getenv("REDIS_URI", "redis://localhost:6379")
 
-        self.milvus_host = os.getenv("MILVUS_HOST", "localhost")
-        self.milvus_port = int(os.getenv("MILVUS_PORT", "19530"))
-
 
 class DatabaseManager:
     """
@@ -40,7 +37,6 @@ class DatabaseManager:
     - PostgreSQL: Relational metadata
     - Elasticsearch: Full-text search
     - Redis: Caching
-    - Milvus: Vector storage for embeddings
     """
 
     def __init__(self, config: DatabaseConfig | None = None):
@@ -51,7 +47,6 @@ class DatabaseManager:
         self._postgres_pool: Any = None
         self._elasticsearch_client: Any = None
         self._redis_client: Any = None
-        self._milvus_client: Any = None
 
         self._connected = False
         self._connection_errors: dict[str, str] = {}
@@ -62,7 +57,6 @@ class DatabaseManager:
         await self.connect_postgres()
         await self.connect_elasticsearch()
         await self.connect_redis()
-        await self.connect_milvus()
         self._connected = True
         logger.info("Connected to all databases")
 
@@ -172,35 +166,6 @@ class DatabaseManager:
             self._connection_errors["redis"] = msg
             return False
 
-    async def connect_milvus(self) -> bool:
-        """Connect to Milvus vector database.
-
-        Returns:
-            True if connection succeeded, False otherwise.
-        """
-        try:
-            from pymilvus import connections
-
-            connections.connect(
-                alias="default",
-                host=self.config.milvus_host,
-                port=self.config.milvus_port,
-            )
-            # Store connection alias to track connection state
-            self._milvus_client = "default"
-            logger.info("Connected to Milvus")
-            return True
-        except ImportError:
-            msg = "pymilvus package not installed"
-            logger.warning(f"{msg}, Milvus connection disabled")
-            self._connection_errors["milvus"] = msg
-            return False
-        except Exception as e:
-            msg = str(e)
-            logger.error(f"Failed to connect to Milvus: {msg}")
-            self._connection_errors["milvus"] = msg
-            return False
-
     async def close_all(self) -> None:
         """Close all database connections."""
         if self._neo4j_driver:
@@ -218,13 +183,6 @@ class DatabaseManager:
         if self._redis_client:
             await self._redis_client.close()
             logger.info("Closed Redis connection")
-
-        if self._milvus_client:
-            from pymilvus import connections
-
-            connections.disconnect(self._milvus_client)
-            self._milvus_client = None
-            logger.info("Closed Milvus connection")
 
         self._connected = False
         self._connection_errors.clear()
@@ -252,10 +210,6 @@ class DatabaseManager:
             "redis": {
                 "connected": self._redis_client is not None,
                 "error": self._connection_errors.get("redis"),
-            },
-            "milvus": {
-                "connected": self._milvus_client is not None,
-                "error": self._connection_errors.get("milvus"),
             },
         }
 
@@ -296,13 +250,6 @@ class DatabaseManager:
         if not self._redis_client:
             raise RuntimeError("Redis not connected")
         return self._redis_client
-
-    @property
-    def milvus_alias(self) -> str:
-        """Get the Milvus connection alias."""
-        if not self._milvus_client:
-            raise RuntimeError("Milvus not connected")
-        return self._milvus_client
 
     async def __aenter__(self) -> "DatabaseManager":
         """Async context manager entry."""

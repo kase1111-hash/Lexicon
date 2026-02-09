@@ -74,9 +74,9 @@ class TestEntityResolutionPipeline:
     def test_resolve_fuzzy_match(self, resolver):
         """Test resolving a fuzzy match."""
         entry = RawLexicalEntry(
-            source_name="ocr",
-            source_id="ocr-1",
-            form="watar",  # OCR error
+            source_name="corpus",
+            source_id="corp-fuzzy-1",
+            form="watar",  # Transcription error
             language="English",
             language_code="eng",
             definitions=["liquid"],

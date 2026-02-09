@@ -118,116 +118,6 @@ services:
           cpus: '0.1'
           memory: 64M
 
-  # Vector Database
-  milvus:
-    image: milvusdb/milvus:v2.3.0
-    container_name: ls-milvus
-    environment:
-      - ETCD_ENDPOINTS=etcd:2379
-      - MINIO_ADDRESS=minio:9000
-    ports:
-      - "19530:19530"
-      - "9091:9091"
-    volumes:
-      - milvus_data:/var/lib/milvus
-    depends_on:
-      - etcd
-      - minio
-    networks:
-      - ls-network
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 4G
-        reservations:
-          cpus: '0.5'
-          memory: 1G
-
-  # Milvus dependencies
-  etcd:
-    image: quay.io/coreos/etcd:v3.5.5
-    container_name: ls-etcd
-    environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
-      - ETCD_SNAPSHOT_COUNT=50000
-    volumes:
-      - etcd_data:/etcd
-    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
-    networks:
-      - ls-network
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.1'
-          memory: 128M
-
-  minio:
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
-    container_name: ls-minio
-    environment:
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
-    volumes:
-      - minio_data:/minio_data
-    command: minio server /minio_data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-    networks:
-      - ls-network
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-
-  # Workflow Orchestration
-  airflow:
-    image: apache/airflow:2.7.0
-    container_name: ls-airflow
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-ls_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres/${POSTGRES_DB:-linguistic_stratigraphy}
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY:?AIRFLOW_FERNET_KEY is required}
-      - AIRFLOW__WEBSERVER__SECRET_KEY=${AIRFLOW_SECRET_KEY:?AIRFLOW_SECRET_KEY is required}
-      - AIRFLOW__CORE__LOAD_EXAMPLES=false
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - airflow_logs:/opt/airflow/logs
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command: >
-      bash -c "airflow db init &&
-               airflow users create --username ${AIRFLOW_ADMIN_USER:-admin} --password ${AIRFLOW_ADMIN_PASSWORD:?AIRFLOW_ADMIN_PASSWORD is required} --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL:-admin@example.com} || true &&
-               airflow webserver & airflow scheduler"
-    networks:
-      - ls-network
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-
   # API Service
   api:
     build:
@@ -241,8 +131,6 @@ services:
       - POSTGRES_URI=postgresql://${POSTGRES_USER:-ls_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres/${POSTGRES_DB:-linguistic_stratigraphy}
       - ELASTICSEARCH_URI=http://elastic:${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD is required}@elasticsearch:9200
       - REDIS_URI=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
-      - MILVUS_HOST=milvus
-      - MILVUS_PORT=19530
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - API_KEY=${API_KEY:-}
     ports:
@@ -276,10 +164,6 @@ volumes:
   postgres_data:
   es_data:
   redis_data:
-  milvus_data:
-  etcd_data:
-  minio_data:
-  airflow_logs:
 
 networks:
   ls-network:
