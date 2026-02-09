@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from src.exceptions import InvalidDateRangeError, LSRNotFoundError
+from src.exceptions import DatabaseError, InvalidDateRangeError, LSRNotFoundError
 from src.models import ErrorResponse
 from src.models.lsr import LSR
 from src.repositories.lsr_repository import LSRRepository
@@ -231,13 +231,52 @@ async def get_etymology(
     # Verify LSR exists
     await repo.get_by_id(lsr_id)
 
-    # TODO: Implement etymology chain retrieval via graph traversal
-    return {
-        "lsr_id": str(lsr_id),
-        "chain": [],
-        "proto_form": None,
-        "depth": 0,
-    }
+    query = """
+    MATCH path = (start:LSR {id: $lsr_id})-[:DESCENDS_FROM*0..]->(ancestor:LSR)
+    WHERE NOT (ancestor)-[:DESCENDS_FROM]->()
+    RETURN path
+    ORDER BY length(path) DESC
+    LIMIT 1
+    """
+
+    try:
+        async with repo.db.neo4j_session() as session:
+            result = await session.run(query, {"lsr_id": str(lsr_id)})
+            record = await result.single()
+
+            if not record:
+                return {
+                    "lsr_id": str(lsr_id),
+                    "chain": [],
+                    "proto_form": None,
+                    "depth": 0,
+                }
+
+            path = record["path"]
+            chain = []
+            for node in path.nodes:
+                chain.append({
+                    "id": dict(node).get("id"),
+                    "form": dict(node).get("form_orthographic"),
+                    "language_code": dict(node).get("language_code"),
+                    "language_name": dict(node).get("language_name"),
+                    "date_start": dict(node).get("date_start"),
+                    "date_end": dict(node).get("date_end"),
+                    "definition": dict(node).get("definition_primary"),
+                })
+
+            return {
+                "lsr_id": str(lsr_id),
+                "chain": chain,
+                "proto_form": chain[-1] if chain else None,
+                "depth": len(chain) - 1,
+            }
+
+    except RuntimeError as e:
+        raise DatabaseError(message=f"Neo4j not connected: {e}")
+    except Exception as e:
+        logger.error(f"Etymology chain retrieval failed: {e}")
+        raise DatabaseError(message=f"Etymology chain retrieval failed: {e}")
 
 
 @router.get(
@@ -259,12 +298,43 @@ async def get_descendants(
     # Verify LSR exists
     await repo.get_by_id(lsr_id)
 
-    # TODO: Implement descendant tree retrieval via graph traversal
-    return {
-        "lsr_id": str(lsr_id),
-        "descendants": [],
-        "depth": depth,
-    }
+    query = f"""
+    MATCH (start:LSR {{id: $lsr_id}})<-[:DESCENDS_FROM*1..{depth}]-(descendant:LSR)
+    RETURN DISTINCT descendant
+    LIMIT 500
+    """
+
+    try:
+        async with repo.db.neo4j_session() as session:
+            result = await session.run(query, {"lsr_id": str(lsr_id)})
+            records = await result.fetch(500)
+
+            descendants = []
+            for record in records:
+                node = record["descendant"]
+                props = dict(node)
+                descendants.append({
+                    "id": props.get("id"),
+                    "form": props.get("form_orthographic"),
+                    "language_code": props.get("language_code"),
+                    "language_name": props.get("language_name"),
+                    "date_start": props.get("date_start"),
+                    "date_end": props.get("date_end"),
+                    "definition": props.get("definition_primary"),
+                })
+
+            return {
+                "lsr_id": str(lsr_id),
+                "descendants": descendants,
+                "count": len(descendants),
+                "depth": depth,
+            }
+
+    except RuntimeError as e:
+        raise DatabaseError(message=f"Neo4j not connected: {e}")
+    except Exception as e:
+        logger.error(f"Descendant retrieval failed: {e}")
+        raise DatabaseError(message=f"Descendant retrieval failed: {e}")
 
 
 @router.get(
@@ -286,11 +356,52 @@ async def get_cognates(
     # Verify LSR exists
     await repo.get_by_id(lsr_id)
 
-    # TODO: Implement cognate retrieval via graph traversal
-    return {
-        "lsr_id": str(lsr_id),
-        "cognates": [],
-    }
+    # Find the proto-ancestor, then find all its descendants in other languages
+    query = """
+    MATCH (start:LSR {id: $lsr_id})-[:DESCENDS_FROM*0..]->(proto:LSR)
+    WHERE NOT (proto)-[:DESCENDS_FROM]->()
+    WITH proto
+    MATCH (proto)<-[:DESCENDS_FROM*1..]-(cognate:LSR)
+    WHERE cognate.id <> $lsr_id
+    RETURN DISTINCT cognate
+    LIMIT 100
+    """
+
+    try:
+        async with repo.db.neo4j_session() as session:
+            result = await session.run(query, {"lsr_id": str(lsr_id)})
+            records = await result.fetch(100)
+
+            cognates = []
+            by_language: dict[str, list] = {}
+            for record in records:
+                node = record["cognate"]
+                props = dict(node)
+                entry = {
+                    "id": props.get("id"),
+                    "form": props.get("form_orthographic"),
+                    "language_code": props.get("language_code"),
+                    "language_name": props.get("language_name"),
+                    "date_start": props.get("date_start"),
+                    "date_end": props.get("date_end"),
+                    "definition": props.get("definition_primary"),
+                }
+                cognates.append(entry)
+                lang = props.get("language_code", "unknown")
+                by_language.setdefault(lang, []).append(entry)
+
+            return {
+                "lsr_id": str(lsr_id),
+                "cognate_count": len(cognates),
+                "languages": list(by_language.keys()),
+                "by_language": by_language,
+            }
+
+    except RuntimeError as e:
+        raise DatabaseError(message=f"Neo4j not connected: {e}")
+    except Exception as e:
+        logger.error(f"Cognate retrieval failed: {e}")
+        raise DatabaseError(message=f"Cognate retrieval failed: {e}")
 
 
 @router.get(
@@ -312,9 +423,60 @@ async def get_borrowings(
     # Verify LSR exists
     await repo.get_by_id(lsr_id)
 
-    # TODO: Implement borrowing retrieval via graph traversal
-    return {
-        "lsr_id": str(lsr_id),
-        "borrowed_from": None,
-        "borrowed_to": [],
-    }
+    # Find what this word borrowed from
+    source_query = """
+    MATCH (l:LSR {id: $lsr_id})-[:BORROWED_FROM]->(donor:LSR)
+    RETURN donor
+    LIMIT 10
+    """
+
+    # Find what borrowed from this word
+    target_query = """
+    MATCH (l:LSR {id: $lsr_id})<-[:BORROWED_FROM]-(recipient:LSR)
+    RETURN recipient
+    LIMIT 100
+    """
+
+    try:
+        async with repo.db.neo4j_session() as session:
+            # Get loan sources (words this LSR borrowed from)
+            source_result = await session.run(source_query, {"lsr_id": str(lsr_id)})
+            source_records = await source_result.fetch(10)
+
+            borrowed_from = []
+            for record in source_records:
+                props = dict(record["donor"])
+                borrowed_from.append({
+                    "id": props.get("id"),
+                    "form": props.get("form_orthographic"),
+                    "language_code": props.get("language_code"),
+                    "language_name": props.get("language_name"),
+                    "definition": props.get("definition_primary"),
+                })
+
+            # Get loan targets (words that borrowed from this LSR)
+            target_result = await session.run(target_query, {"lsr_id": str(lsr_id)})
+            target_records = await target_result.fetch(100)
+
+            borrowed_to = []
+            for record in target_records:
+                props = dict(record["recipient"])
+                borrowed_to.append({
+                    "id": props.get("id"),
+                    "form": props.get("form_orthographic"),
+                    "language_code": props.get("language_code"),
+                    "language_name": props.get("language_name"),
+                    "definition": props.get("definition_primary"),
+                })
+
+            return {
+                "lsr_id": str(lsr_id),
+                "borrowed_from": borrowed_from,
+                "borrowed_to": borrowed_to,
+            }
+
+    except RuntimeError as e:
+        raise DatabaseError(message=f"Neo4j not connected: {e}")
+    except Exception as e:
+        logger.error(f"Borrowing retrieval failed: {e}")
+        raise DatabaseError(message=f"Borrowing retrieval failed: {e}")
