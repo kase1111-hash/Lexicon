@@ -8,22 +8,19 @@ Automated infrastructure for building and maintaining a cross-linguistic lexical
 
 ## Overview
 
-Linguistic Stratigraphy is a system that ingests etymological data from multiple sources, constructs a unified knowledge graph, trains diachronic embeddings, and exposes analysis tools via API. It enables:
+Linguistic Stratigraphy is a system that ingests etymological data from multiple sources, constructs a unified knowledge graph, and exposes analysis tools via API. It enables:
 
 - **Temporal Dating**: Date texts by analyzing vocabulary usage patterns
 - **Contact Detection**: Identify language contact events and borrowing patterns
 - **Semantic Drift Analysis**: Track how word meanings evolve over time
 - **Forgery Detection**: Identify anachronistic vocabulary in historical texts
-- **Phylogenetic Inference**: Reconstruct language family relationships
 
 ## Features
 
 - 🔗 **Unified Knowledge Graph**: Cross-linguistic lexical data across language families
-- 🕐 **Diachronic Embeddings**: Time-aware semantic vectors for historical analysis
-- 🔍 **Multi-Source Ingestion**: Wiktionary, CLLD/CLICS, historical corpora, OCR
+- 🔍 **Multi-Source Ingestion**: Wiktionary, CLLD/CLICS, historical corpora
 - 🚀 **REST & GraphQL APIs**: Query the graph programmatically
 - 📊 **Analysis Pipelines**: Text dating, contact detection, semantic drift
-- 🔄 **Automated Updates**: Scheduled ingestion and model retraining
 
 ## Quick Start
 
@@ -139,29 +136,21 @@ print(f"Confidence: {result.confidence}")
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           ORCHESTRATION LAYER                               │
-│                         (Apache Airflow)                                    │
-└─────────────────────────────────────────────────────────────────────────────┘
-        │                    │                    │                    │
-        ▼                    ▼                    ▼                    ▼
-┌───────────────┐  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
-│   INGESTION   │  │  PROCESSING   │  │   TRAINING    │  │   SERVING     │
-│   PIPELINE    │  │   PIPELINE    │  │   PIPELINE    │  │   LAYER       │
-├───────────────┤  ├───────────────┤  ├───────────────┤  ├───────────────┤
-│ • Wiktionary  │  │ • Entity Res. │  │ • Embeddings  │  │ • REST API    │
-│ • CLLD/CLICS  │  │ • Dedup       │  │ • Clustering  │  │ • GraphQL     │
-│ • Corpora     │  │ • Linking     │  │ • Phylogeny   │  │ • WebSocket   │
-│ • OCR Texts   │  │ • Validation  │  │ • Classifiers │  │ • Batch Jobs  │
-└───────────────┘  └───────────────┘  └───────────────┘  └───────────────┘
-        │                    │                    │                    │
-        ▼                    ▼                    ▼                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            STORAGE LAYER                                    │
-├─────────────────┬─────────────────┬─────────────────┬───────────────────────┤
-│   Neo4j         │    Milvus       │  Elasticsearch  │     PostgreSQL        │
-│   (Graph)       │    (Vectors)    │  (Full-text)    │     (Metadata)        │
-└─────────────────┴─────────────────┴─────────────────┴───────────────────────┘
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│   INGESTION   │  │  PROCESSING   │  │   SERVING     │
+├───────────────┤  ├───────────────┤  ├───────────────┤
+│ • Wiktionary  │  │ • Entity Res. │  │ • REST API    │
+│ • CLLD/CLICS  │  │ • Dedup       │  │ • GraphQL     │
+│ • Corpora     │  │ • Validation  │  │ • Analysis    │
+└───────────────┘  └───────────────┘  └───────────────┘
+        │                    │                    │
+        ▼                    ▼                    ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        STORAGE LAYER                             │
+├──────────────────┬──────────────────┬────────────────────────────┤
+│   Neo4j          │  Elasticsearch   │     PostgreSQL             │
+│   (Graph)        │  (Full-text)     │     (Metadata)             │
+└──────────────────┴──────────────────┴────────────────────────────┘
 ```
 
 ## Project Structure
@@ -172,14 +161,12 @@ linguistic-stratigraphy/
 │   ├── adapters/        # Data source adapters (Wiktionary, CLLD, etc.)
 │   ├── pipelines/       # Processing pipelines
 │   ├── models/          # Data models (LSR, Language, Edge)
-│   ├── training/        # ML training pipelines
-│   ├── analysis/        # Analysis modules
+│   ├── analysis/        # Analysis modules (dating, contact, drift)
 │   ├── api/             # REST & GraphQL API
+│   ├── repositories/    # Data access layer
 │   └── utils/           # Utilities
 ├── tests/               # Unit and integration tests
-├── dags/                # Airflow DAG definitions
 ├── scripts/             # Setup and utility scripts
-├── k8s/                 # Kubernetes configurations
 └── docs/                # Documentation
 ```
 
@@ -261,7 +248,6 @@ Key environment variables (see `.env.example`):
 | `NEO4J_URI` | Neo4j connection URI | `bolt://localhost:7687` |
 | `POSTGRES_URI` | PostgreSQL connection URI | `postgresql://...` |
 | `ELASTICSEARCH_URI` | Elasticsearch URI | `http://localhost:9200` |
-| `MILVUS_HOST` | Milvus vector DB host | `localhost` |
 | `LOG_LEVEL` | Logging level | `INFO` |
 
 ## Documentation

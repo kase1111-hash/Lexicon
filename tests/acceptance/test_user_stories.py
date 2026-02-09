@@ -22,7 +22,7 @@ class TestUserStoryDataIngestion:
     sources so that I can build a comprehensive cross-linguistic database.
 
     Acceptance Criteria:
-    - Can ingest data from Wiktionary, CLLD, corpus, and OCR sources
+    - Can ingest data from Wiktionary, CLLD, and corpus sources
     - Data is normalized to a common format (RawLexicalEntry)
     - Duplicate entries are detected and merged appropriately
     - Data quality issues are flagged for review
@@ -66,21 +66,6 @@ class TestUserStoryDataIngestion:
 
         assert entry.source_name == "clld"
         assert entry.language_code == "deu"
-
-    def test_ingest_entry_from_ocr_source(self):
-        """Verify OCR-extracted data can be ingested with quality markers."""
-        entry = RawLexicalEntry(
-            source_name="ocr",
-            source_id="ocr-manuscript-123",
-            form="watar",  # OCR error
-            language="English",
-            language_code="eng",
-            definitions=["liquid"],
-            raw_data={"ocr_confidence": 0.85, "source_document": "manuscript.pdf"},
-        )
-
-        assert entry.source_name == "ocr"
-        assert entry.raw_data.get("ocr_confidence") == 0.85
 
     def test_convert_raw_entry_to_lsr(self):
         """Verify raw entries are converted to LSR format."""
@@ -156,11 +141,11 @@ class TestUserStoryDataIngestion:
         )
         resolver.set_lsr_store({existing.id: existing})
 
-        # Entry with questionable quality (OCR error)
+        # Entry with questionable quality (transcription error)
         low_quality = RawLexicalEntry(
-            source_name="ocr",
-            source_id="ocr-1",
-            form="watar",  # Likely OCR error
+            source_name="corpus",
+            source_id="corp-lowq-1",
+            form="watar",  # Likely transcription error
             language="English",
             language_code="eng",
             definitions=["liquid"],

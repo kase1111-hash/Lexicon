@@ -108,14 +108,14 @@ class TestDataIngestionWorkflow:
         ]
 
     def test_fuzzy_match_workflow(self, entity_resolver, existing_lsr_store):
-        """Test fuzzy matching for OCR/transcription errors."""
+        """Test fuzzy matching for transcription errors."""
         entity_resolver.set_lsr_store(existing_lsr_store)
 
-        # Simulate OCR error
+        # Simulate transcription error
         ocr_entry = RawLexicalEntry(
-            source_name="ocr",
-            source_id="ocr-doc-1",
-            form="watar",  # OCR misread
+            source_name="corpus",
+            source_id="corp-doc-1",
+            form="watar",  # Transcription error
             language="English",
             language_code="eng",
             definitions=["liquid"],
