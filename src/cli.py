@@ -37,7 +37,18 @@ logger = logging.getLogger("lexicon")
 def cmd_ingest(args: argparse.Namespace) -> None:
     """Run the ingestion pipeline."""
     # Import here to avoid circular deps and heavy imports at startup
-    from scripts.ingest import IngestionStats, load_word_list, run_ingestion
+    from scripts.ingest import load_word_list, run_ingestion, run_wold_ingestion
+
+    if args.source == "wold":
+        languages = args.language.split(",") if args.language else None
+        stats = run_wold_ingestion(
+            data_dir=args.data_dir,
+            languages_filter=languages,
+            borrowings_only=args.borrowings_only,
+            dry_run=args.dry_run,
+        )
+        print(stats.summary())
+        return
 
     if args.word:
         words = [args.word]
@@ -253,10 +264,14 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # ingest
-    p_ingest = subparsers.add_parser("ingest", help="Ingest words from Wiktionary")
+    p_ingest = subparsers.add_parser("ingest", help="Ingest from Wiktionary or WOLD")
+    p_ingest.add_argument("--source", type=str, choices=["wiktionary", "wold"],
+                          default="wiktionary", help="Data source")
     p_ingest.add_argument("--words", type=str, help="Path to word list file")
     p_ingest.add_argument("--word", type=str, help="Single word to ingest")
     p_ingest.add_argument("--language", type=str, help="Language filter (e.g. 'English')")
+    p_ingest.add_argument("--data-dir", type=str, help="WOLD data directory")
+    p_ingest.add_argument("--borrowings-only", action="store_true", help="WOLD: borrowings only")
     p_ingest.add_argument("--dry-run", action="store_true", help="Don't persist")
     p_ingest.add_argument("--rate-limit", type=int, default=100, help="Rate limit (ms)")
 
