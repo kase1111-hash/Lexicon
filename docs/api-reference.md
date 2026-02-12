@@ -5,7 +5,7 @@ The Linguistic Stratigraphy API provides RESTful endpoints for lexical evolution
 ## Base URL
 
 - **Development**: `http://localhost:8000`
-- **Production**: `https://api.linguistic-stratigraphy.com`
+- **API prefix**: `/api/v1`
 
 ## Interactive Documentation
 
@@ -15,11 +15,13 @@ The Linguistic Stratigraphy API provides RESTful endpoints for lexical evolution
 
 ## Authentication
 
-API key authentication (when enabled):
+API key authentication via the `X-API-Key` header (when enabled via the `API_KEY` environment variable):
 
 ```bash
-curl -H "X-API-Key: your-api-key" https://api.example.com/lsr/search
+curl -H "X-API-Key: your-api-key" http://localhost:8000/api/v1/lsr/search?form=water
 ```
+
+Authentication is disabled by default for development. Set `API_KEY` in your `.env` to enable it.
 
 ## Endpoints
 
@@ -28,123 +30,283 @@ curl -H "X-API-Key: your-api-key" https://api.example.com/lsr/search
 #### Search LSRs
 
 ```http
-POST /lsr/search
-Content-Type: application/json
+GET /api/v1/lsr/search?form=water&language=eng&limit=20&offset=0
+```
 
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `form` | string | No | Form to search (exact or fuzzy), max 200 chars |
+| `language` | string | No | ISO 639-3 language code |
+| `date_start` | integer | No | Start year (negative for BCE) |
+| `date_end` | integer | No | End year |
+| `semantic_field` | string | No | WordNet synset ID filter |
+| `limit` | integer | No | Max results (default 20, max 100) |
+| `offset` | integer | No | Pagination offset (default 0) |
+
+**Response:**
+
+```json
 {
-  "query": "water",
-  "language_codes": ["eng", "deu"],
-  "date_range": {"start": 1500, "end": 1800},
-  "limit": 50
+  "results": [...],
+  "total": 42,
+  "limit": 20,
+  "offset": 0,
+  "filters": {
+    "form": "water",
+    "language": "eng",
+    "date_start": null,
+    "date_end": null,
+    "semantic_field": null
+  }
 }
 ```
 
 #### Get LSR by ID
 
 ```http
-GET /lsr/{id}
+GET /api/v1/lsr/{lsr_id}
 ```
 
 #### Create LSR
 
 ```http
-POST /lsr/
+POST /api/v1/lsr/
 Content-Type: application/json
 
 {
-  "form": "water",
-  "form_normalized": "water",
+  "form_orthographic": "water",
   "language_code": "eng",
+  "form_phonetic": "ˈwɔːtər",
+  "definition_primary": "a clear liquid...",
   "date_start": 1000,
-  "date_end": 1500,
-  "register": "common",
-  "definitions": ["clear liquid..."],
-  "source": "OED"
+  "date_end": 2024
 }
 ```
 
-### Analysis
+Returns `201 Created` on success.
 
-#### Trace Etymology
+#### Delete LSR
 
 ```http
-POST /analysis/etymology
-Content-Type: application/json
-
-{
-  "form": "computer",
-  "language_code": "eng",
-  "max_depth": 5
-}
+DELETE /api/v1/lsr/{lsr_id}
 ```
 
-Response:
+#### Get Etymology Chain
+
+```http
+GET /api/v1/lsr/{lsr_id}/etymology
+```
+
+Traces DESCENDS_FROM relationships back to the earliest ancestor (proto-form).
+
+**Response:**
 
 ```json
 {
-  "word": "computer",
-  "etymology_chain": [
-    {"form": "computer", "language": "eng", "date": "1640"},
-    {"form": "computare", "language": "lat", "date": "-100"}
+  "lsr_id": "uuid",
+  "chain": [
+    {
+      "id": "uuid",
+      "form": "water",
+      "language_code": "eng",
+      "language_name": "English",
+      "date_start": 1000,
+      "date_end": 2024,
+      "definition": "a clear liquid..."
+    }
   ],
-  "borrowing_path": ["lat -> eng"]
+  "proto_form": {...},
+  "depth": 3
 }
 ```
+
+#### Get Descendants
+
+```http
+GET /api/v1/lsr/{lsr_id}/descendants?depth=3
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `depth` | integer | 3 | Maximum depth to traverse (1-10) |
+
+#### Get Cognates
+
+```http
+GET /api/v1/lsr/{lsr_id}/cognates
+```
+
+Returns words in other languages that share a common ancestor.
+
+#### Get Borrowings
+
+```http
+GET /api/v1/lsr/{lsr_id}/borrowings
+```
+
+Returns both words this LSR borrowed from and words that borrowed from it.
+
+### Analysis
 
 #### Date Text
 
 ```http
-POST /analysis/date-text
+POST /api/v1/analyze/date-text
 Content-Type: application/json
 
 {
   "text": "The quick brown fox...",
-  "language_code": "eng"
+  "language": "eng"
 }
 ```
 
-#### Detect Language Contact
+**Response:**
 
-```http
-POST /analysis/contact-events
-Content-Type: application/json
-
+```json
 {
-  "language_codes": ["eng", "fra"],
-  "date_range": {"start": 1000, "end": 1500}
+  "predicted_date_range": [1400, 1600],
+  "confidence": 0.75,
+  "diagnostic_vocabulary": [
+    {"word": "knight", "date_start": 1100, "date_end": 1800, "span": 700, "diagnostic_value": 0.5}
+  ],
+  "analysis": {
+    "language": "eng",
+    "text_length": 120,
+    "word_count": 25,
+    "tokens_analyzed": 25,
+    "tokens_matched": 18,
+    "method": "vocabulary_attestation"
+  }
 }
 ```
 
-#### Analyze Semantic Drift
+#### Detect Anachronisms
 
 ```http
-POST /analysis/semantic-drift
+POST /api/v1/analyze/detect-anachronisms
 Content-Type: application/json
 
 {
-  "form": "nice",
-  "language_code": "eng"
+  "text": "The knight used a computer",
+  "claimed_date": 1300,
+  "language": "eng"
 }
+```
+
+**Response:**
+
+```json
+{
+  "anachronisms": [
+    {
+      "word": "computer",
+      "earliest_attestation": 1640,
+      "claimed_date": 1300,
+      "gap_years": 340,
+      "severity": "high"
+    }
+  ],
+  "verdict": "anachronistic",
+  "confidence": 0.3,
+  "explanation": "Multiple anachronisms detected...",
+  "analysis": {
+    "language": "eng",
+    "claimed_date": 1300,
+    "words_analyzed": 5
+  }
+}
+```
+
+#### Get Contact Events
+
+```http
+GET /api/v1/analyze/contact-events?language=eng&date_start=1000&date_end=1500
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `language` | string | Yes | ISO 639-3 language code |
+| `date_start` | integer | No | Start year |
+| `date_end` | integer | No | End year |
+
+#### Get Semantic Drift
+
+```http
+GET /api/v1/analyze/semantic-drift?form=nice&language=eng
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `form` | string | Yes | Word form to analyze |
+| `language` | string | Yes | ISO 639-3 language code |
+
+#### Compare Concept Across Languages
+
+```http
+GET /api/v1/analyze/compare-concept?concept=freedom&languages=eng,deu,fra
 ```
 
 ### Graph
 
-#### Get Neighbors
+#### Execute Cypher Query
 
 ```http
-GET /graph/neighbors/{lsr_id}?depth=2&relationship_types=BORROWED_FROM,COGNATE_OF
-```
-
-#### Find Path
-
-```http
-POST /graph/path
+POST /api/v1/graph/query
 Content-Type: application/json
 
 {
-  "source_id": "uuid-1",
-  "target_id": "uuid-2",
-  "max_depth": 10
+  "query": "MATCH (l:LSR {language_code: $lang}) RETURN l LIMIT 10",
+  "parameters": {"lang": "eng"}
+}
+```
+
+Queries are validated for safety (destructive operations are blocked).
+
+#### Find Path Between LSRs
+
+```http
+GET /api/v1/graph/path?from_lsr={uuid}&to_lsr={uuid}&max_hops=5&relationship_types=DESCENDS_FROM,BORROWED_FROM
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `from_lsr` | UUID | Yes | Source LSR ID |
+| `to_lsr` | UUID | Yes | Target LSR ID |
+| `max_hops` | integer | No | Max path length (default 5, max 20) |
+| `relationship_types` | string | No | Comma-separated types to traverse |
+
+#### Get Etymology Chain (Graph)
+
+```http
+GET /api/v1/graph/etymology/{lsr_id}?max_depth=10
+```
+
+#### Get Cognates (Graph)
+
+```http
+GET /api/v1/graph/cognates/{lsr_id}
+```
+
+#### Bulk Export
+
+```http
+POST /api/v1/graph/bulk/export
+Content-Type: application/json
+
+{
+  "language": "eng",
+  "format": "json",
+  "include_relationships": true
 }
 ```
 
@@ -161,7 +323,7 @@ Response:
 ```json
 {
   "status": "healthy",
-  "version": "0.1.0",
+  "api": "up",
   "databases": {
     "neo4j": "connected",
     "postgres": "connected",
@@ -187,18 +349,23 @@ GET /metrics/json
 
 Returns metrics as JSON for debugging.
 
+#### Traces
+
+```http
+GET /traces?limit=100
+```
+
+Returns recent completed spans for debugging.
+
 ## Error Handling
 
 All errors follow a consistent format:
 
 ```json
 {
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "LSR not found",
-    "details": {"id": "uuid-123"},
-    "request_id": "req-456"
-  }
+  "error": "NOT_FOUND",
+  "message": "LSR not found",
+  "details": {"id": "uuid-123"}
 }
 ```
 
@@ -214,64 +381,36 @@ All errors follow a consistent format:
 | `RATE_LIMIT_ERROR` | 429 | Too many requests |
 | `DATABASE_ERROR` | 500 | Database operation failed |
 | `ANALYSIS_ERROR` | 500 | Analysis operation failed |
+| `INTERNAL_ERROR` | 500 | Unexpected server error |
 
 ## Rate Limiting
 
-Default limits:
-- 100 requests per minute per API key
-- 429 response when exceeded
+Default: 100 requests per minute (configurable via `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW_SECONDS` environment variables).
 
-Headers returned:
-- `X-RateLimit-Limit`: Request limit
-- `X-RateLimit-Remaining`: Requests remaining
-- `X-RateLimit-Reset`: Reset timestamp
+A `429 Too Many Requests` response is returned when exceeded, with a `Retry-After` header.
 
 ## Pagination
 
-List endpoints support pagination:
+Search endpoints support pagination via `offset` and `limit` query parameters:
 
 ```http
-GET /lsr/list?offset=0&limit=50
+GET /api/v1/lsr/search?form=water&offset=0&limit=50
 ```
 
 Response includes pagination metadata:
 
 ```json
 {
-  "data": [...],
-  "pagination": {
-    "offset": 0,
-    "limit": 50,
-    "total": 1234,
-    "has_more": true
-  }
+  "results": [...],
+  "total": 1234,
+  "limit": 50,
+  "offset": 0
 }
 ```
 
-## Versioning
+## Postman / OpenAPI
 
-API version is included in responses and can be checked at `/health`.
-
-Current version: `0.1.0`
-
-## SDKs and Libraries
-
-### Python
-
-```bash
-pip install linguistic-stratigraphy
-```
-
-```python
-from linguistic_stratigraphy import Client
-
-client = Client(api_key="your-key")
-results = client.search_lsr(query="water", language_codes=["eng"])
-```
-
-## Postman Collection
-
-Import the OpenAPI spec directly into Postman:
+Import the OpenAPI spec directly into Postman or other API clients:
 
 1. Open Postman
 2. Click "Import"

@@ -6,10 +6,10 @@ This document provides comprehensive architecture diagrams and documentation for
 
 The Linguistic Stratigraphy system is designed as a set of loosely coupled services organized into four main layers:
 
-1. **Orchestration Layer** - Workflow management (Airflow/Prefect)
-2. **Ingestion Pipeline** - Data source adapters
-3. **Processing Pipeline** - Entity resolution, relationship extraction, validation
-4. **Serving Layer** - REST API, GraphQL, WebSocket
+1. **Ingestion Pipeline** - Data source adapters (Wiktionary, CLLD, Corpus)
+2. **Processing Pipeline** - Entity resolution, relationship extraction, validation
+3. **Serving Layer** - REST API, GraphQL
+4. **Storage Layer** - Neo4j, PostgreSQL, Elasticsearch, Redis
 
 ## High-Level Architecture Diagram
 
@@ -17,8 +17,6 @@ The Linguistic Stratigraphy system is designed as a set of loosely coupled servi
 graph TB
     subgraph "Client Layer"
         CLI[CLI Tools]
-        SDK[Python SDK]
-        WEB[Web Client]
     end
 
     subgraph "API Layer"
@@ -35,10 +33,10 @@ graph TB
     end
 
     subgraph "Pipeline Layer"
-        NLP[NLP Pipeline]
-        ETY[Etymology Pipeline]
         ENT[Entity Resolution]
+        REL[Relationship Extraction]
         EMB[Embedding Pipeline]
+        VALID[Validation]
     end
 
     subgraph "Data Layer"
@@ -46,19 +44,15 @@ graph TB
         PG[(PostgreSQL)]
         ES[(Elasticsearch)]
         REDIS[(Redis Cache)]
-        MILVUS[(Milvus Vectors)]
     end
 
     subgraph "External Sources"
         WIK[Wiktionary]
         CLLD[CLLD Database]
         CORP[Text Corpora]
-        OCR[OCR Sources]
     end
 
     CLI --> API
-    SDK --> API
-    WEB --> API
 
     API --> REST
     API --> GQL
@@ -68,36 +62,36 @@ graph TB
     GQL --> LSR
     GQL --> ANA
 
-    LSR --> NLP
-    ANA --> ETY
-    ANA --> ENT
-    ANA --> EMB
-
-    NLP --> NEO
-    ETY --> NEO
-    ENT --> NEO
-    EMB --> MILVUS
-
+    LSR --> NEO
     LSR --> PG
     LSR --> ES
     LSR --> REDIS
 
+    ANA --> NEO
+    ANA --> REDIS
+
     ING --> WIK
     ING --> CLLD
     ING --> CORP
-    ING --> OCR
 
-    ING --> NLP
+    ING --> ENT
+    ING --> REL
+    ING --> EMB
+    ING --> VALID
+
+    ENT --> NEO
+    REL --> NEO
+    EMB --> NEO
+    VALID --> NEO
 ```
 
 ## Storage Layer
 
 The system uses multiple specialized databases:
 
-- **Neo4j/ArangoDB** - Graph storage for LSRs and relationships
+- **Neo4j** - Graph storage for LSRs and relationships
 - **PostgreSQL** - Metadata, job tracking, validation queues
 - **Elasticsearch** - Full-text search
-- **Milvus/Pinecone** - Vector embeddings
 - **Redis** - Caching and queues
 
 ## Data Flow
@@ -114,18 +108,12 @@ Sources → Adapters → Entity Resolution → Relationship Extraction → Valid
 - `WiktionaryAdapter` - Wiktionary dumps and API
 - `CLLDAdapter` - CLICS, WOLD, ASJP
 - `CorpusAdapter` - Historical text corpora
-- `OCRAdapter` - Digitized manuscripts
 
 ### Processing Pipelines
 - `EntityResolver` - Deduplication and matching
 - `RelationshipExtractor` - Etymology parsing, cognate detection
 - `Validator` - Schema, consistency, anomaly detection
 - `EmbeddingPipeline` - Semantic vector generation
-
-### Training Pipelines
-- `DiachronicEmbeddingTrainer` - Time-aware embeddings
-- `ClassifierTrainer` - Text dating, contact detection
-- `PhylogeneticInference` - Language tree reconstruction
 
 ### Analysis Modules
 - `TextDating` - Date prediction and anachronism detection
@@ -138,17 +126,7 @@ Sources → Adapters → Entity Resolution → Relationship Extraction → Valid
 Use Docker Compose for local development. See `docker-compose.yml`.
 
 ### Production
-Kubernetes deployment with separate namespaces:
-- `ls-serving` - API services
-- `ls-data` - Database services
-- `ls-compute` - Processing workers
-- `ls-monitoring` - Observability stack
-
-## Scheduled Jobs
-
-- **Daily** (2 AM): Incremental ingestion from Wiktionary
-- **Weekly** (Sunday): Full dump processing, embedding retrain
-- **Monthly** (1st): Phylogenetic tree reconstruction
+Use `make run-api-prod` to run with multiple workers, or build the Docker image for containerized deployment.
 
 ## Data Flow Diagrams
 
@@ -164,7 +142,7 @@ sequenceDiagram
     participant NEO as Neo4j
     participant ES as Elasticsearch
 
-    C->>API: POST /lsr/
+    C->>API: POST /api/v1/lsr/
     API->>VAL: Validate input
     VAL-->>API: Valid
 
@@ -203,7 +181,7 @@ sequenceDiagram
     participant NEO as Neo4j
     participant CACHE as Redis
 
-    C->>API: POST /analysis/etymology
+    C->>API: GET /api/v1/lsr/{id}/etymology
     API->>CACHE: Check cache
 
     alt Cache hit
@@ -211,7 +189,7 @@ sequenceDiagram
         API-->>C: Etymology chain
     else Cache miss
         API->>ANA: Analyze etymology
-        ANA->>NEO: Traverse BORROWED_FROM
+        ANA->>NEO: Traverse DESCENDS_FROM
         NEO-->>ANA: Path nodes
 
         loop For each node
@@ -258,7 +236,6 @@ flowchart TD
         D1[(Neo4j)]
         D2[(PostgreSQL)]
         D3[(Elasticsearch)]
-        D4[(Milvus)]
     end
 
     S1 --> E1
@@ -276,7 +253,6 @@ flowchart TD
     R3 -->|New| D1
     R3 -->|New| D2
     R3 -->|New| D3
-    R3 -->|New| D4
     R3 -->|Merge| D1
 ```
 
@@ -347,7 +323,7 @@ graph LR
     subgraph "Relationship Types"
         LSR1 -->|BORROWED_FROM| LSR2((LSR))
         LSR1 -->|COGNATE_OF| LSR3((LSR))
-        LSR1 -->|DERIVED_FROM| LSR4((LSR))
+        LSR1 -->|DESCENDS_FROM| LSR4((LSR))
         LSR1 -->|BELONGS_TO| LANG1
         LSR1 -->|HAS_ATTESTATION| ATT1
         LANG1 -->|CONTACT_WITH| LANG2((Language))
@@ -481,13 +457,10 @@ flowchart LR
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | API Framework | FastAPI | REST + GraphQL endpoints |
+| GraphQL | Strawberry | GraphQL schema and resolvers |
 | Graph Database | Neo4j | Lexical relationships |
-| Relational DB | PostgreSQL | Metadata, users, jobs |
+| Relational DB | PostgreSQL | Metadata and job tracking |
 | Search Engine | Elasticsearch | Full-text search |
-| Vector Store | Milvus | Semantic similarity |
-| Cache | Redis | Session, query cache |
-| NLP | spaCy, Stanza | Text processing |
-| ML | Transformers | Embeddings |
-| Orchestration | Airflow | Data pipelines |
-| Monitoring | Prometheus + Grafana | Metrics |
+| Cache | Redis | Query and result caching |
+| Validation | Pydantic | Data validation and settings |
 | Error Tracking | Sentry | Error reporting |
