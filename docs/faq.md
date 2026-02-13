@@ -38,16 +38,14 @@ Yes, the project is open-source under the MIT license. You can use, modify, and 
 
 ### Why is Docker required?
 
-Docker simplifies running the multiple database services (Neo4j, PostgreSQL, Elasticsearch, Redis, Milvus) needed by the system. You can run without Docker if you install and configure each service manually.
+Docker simplifies running the multiple database services (Neo4j, PostgreSQL, Elasticsearch, Redis) needed by the system. You can run without Docker if you install and configure each service manually.
 
 ### Can I run this on Windows?
 
 Yes, with either:
 1. Docker Desktop for Windows
-2. WSL2 (Windows Subsystem for Linux)
+2. WSL2 (Windows Subsystem for Linux) - recommended
 3. Native installation (more complex)
-
-Use `scripts/build.bat` for Windows-specific commands.
 
 ### Installation fails with "out of memory" error
 
@@ -64,7 +62,7 @@ The default Docker configuration allocates limited memory. Increase Docker's mem
 By default, authentication is disabled for development. In production:
 
 ```bash
-curl -H "X-API-Key: your-api-key" http://localhost:8000/lsr/search
+curl -H "X-API-Key: your-api-key" http://localhost:8000/api/v1/lsr/search?form=water
 ```
 
 Configure the API key in your `.env` file:
@@ -74,7 +72,7 @@ API_KEY=your-secure-api-key
 
 ### What's the difference between REST and GraphQL endpoints?
 
-- **REST** (`/lsr/*`, `/analysis/*`): Traditional endpoints, simpler queries
+- **REST** (`/api/v1/lsr/*`, `/api/v1/analyze/*`, `/api/v1/graph/*`): Traditional endpoints, simpler queries
 - **GraphQL** (`/graphql`): Flexible queries, fetch exactly what you need
 
 Use REST for simple operations, GraphQL for complex nested queries.
@@ -89,15 +87,7 @@ Default limits:
 
 ```bash
 # REST
-curl "http://localhost:8000/lsr/search?language_code=eng&limit=100"
-
-# GraphQL
-query {
-  searchLSR(languageCode: "eng", limit: 100) {
-    items { form, dateStart, dateEnd }
-    total
-  }
-}
+curl "http://localhost:8000/api/v1/lsr/search?language=eng&limit=100"
 ```
 
 ---
@@ -115,9 +105,12 @@ An LSR represents a word at a specific point in time and language. It captures:
 
 ### How fresh is the data?
 
-- **Wiktionary**: Updated daily (incremental)
-- **CLLD databases**: Updated weekly
-- **Embeddings**: Retrained weekly
+Data freshness depends on how often you run the ingestion pipeline. Use the CLI or Make targets to ingest data:
+
+```bash
+make ingest-wiktionary   # Ingest from Wiktionary
+make ingest-clld         # Ingest from CLLD database
+```
 
 ### Can I import my own data?
 
@@ -199,22 +192,21 @@ LOG_FILE=/var/log/ls/app.log
 
 ### How much memory does it need?
 
-Minimum requirements:
-- Neo4j: 2GB heap
-- Elasticsearch: 2GB
+Minimum requirements (per docker-compose.yml resource limits):
+- Neo4j: 3GB (2GB heap)
+- Elasticsearch: 2GB (1GB heap)
 - PostgreSQL: 1GB
-- Milvus: 2GB
+- Redis: 512MB
 - API: 1GB
 
 Total: ~8GB minimum, 16GB recommended
 
 ### Can I run on a smaller machine?
 
-Yes, with reduced functionality:
-1. Use SQLite instead of PostgreSQL
-2. Disable Milvus (no vector search)
-3. Reduce Elasticsearch heap
-4. Use external hosted services
+Yes, with reduced configuration:
+1. Reduce Neo4j and Elasticsearch heap sizes in `docker-compose.yml`
+2. Use external hosted database services
+3. Run only the services you need (e.g., skip Elasticsearch if full-text search is not required)
 
 ---
 
@@ -227,5 +219,5 @@ See [troubleshooting.md](troubleshooting.md) for common issues and solutions.
 ## Getting Help
 
 - **Documentation**: [docs/](.)
-- **Issues**: [GitHub Issues](https://github.com/linguistic-stratigraphy/linguistic-stratigraphy/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/linguistic-stratigraphy/linguistic-stratigraphy/discussions)
+- **Issues**: [GitHub Issues](https://github.com/kase1111-hash/Lexicon/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/kase1111-hash/Lexicon/discussions)

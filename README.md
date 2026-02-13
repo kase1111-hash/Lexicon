@@ -34,8 +34,8 @@ Linguistic Stratigraphy is a system that ingests etymological data from multiple
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/linguistic-stratigraphy/linguistic-stratigraphy.git
-   cd linguistic-stratigraphy
+   git clone https://github.com/kase1111-hash/Lexicon.git
+   cd Lexicon
    ```
 
 2. **Set up environment**
@@ -118,19 +118,19 @@ query {
 ### Python Client
 
 ```python
-from src.models.lsr import LSR
-from src.analysis.dating import TextDatingClassifier
+from src.analysis.dating import TextDating
 
-# Initialize classifier
-classifier = TextDatingClassifier()
+# Initialize the text dating analyzer
+dater = TextDating()
 
 # Date a text
-result = classifier.predict_date(
+result = dater.date_text(
     text="Þis is an olde text with middel englisch wordes",
     language="eng"
 )
-print(f"Predicted date: {result.date_range}")
+print(f"Predicted date: {result.predicted_range}")
 print(f"Confidence: {result.confidence}")
+print(f"Diagnostic vocabulary: {result.diagnostic_vocabulary}")
 ```
 
 ## Architecture
@@ -145,18 +145,18 @@ print(f"Confidence: {result.confidence}")
 └───────────────┘  └───────────────┘  └───────────────┘
         │                    │                    │
         ▼                    ▼                    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        STORAGE LAYER                             │
-├──────────────────┬──────────────────┬────────────────────────────┤
-│   Neo4j          │  Elasticsearch   │     PostgreSQL             │
-│   (Graph)        │  (Full-text)     │     (Metadata)             │
-└──────────────────┴──────────────────┴────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              STORAGE LAYER                                   │
+├──────────────────┬──────────────────┬──────────────────┬────────────────────┤
+│   Neo4j          │  Elasticsearch   │  PostgreSQL      │   Redis            │
+│   (Graph)        │  (Full-text)     │  (Metadata)      │   (Cache)          │
+└──────────────────┴──────────────────┴──────────────────┴────────────────────┘
 ```
 
 ## Project Structure
 
 ```
-linguistic-stratigraphy/
+Lexicon/
 ├── src/
 │   ├── adapters/        # Data source adapters (Wiktionary, CLLD, etc.)
 │   ├── pipelines/       # Processing pipelines
@@ -234,8 +234,8 @@ The core data unit is the **Lexical State Record (LSR)**, representing a word at
 | `date_start/end` | Integer | Attested date range |
 | `semantic_vector` | Float[384] | Embedding representation |
 | `definition_primary` | String | Main gloss |
-| `ancestors` | UUID[] | Inheritance pointers |
-| `cognates` | UUID[] | Related forms in other languages |
+| `ancestor_ids` | UUID[] | Inheritance pointers |
+| `cognate_ids` | UUID[] | Related forms in other languages |
 
 See [docs/data_model.md](docs/data_model.md) for complete schema.
 
@@ -248,6 +248,8 @@ Key environment variables (see `.env.example`):
 | `NEO4J_URI` | Neo4j connection URI | `bolt://localhost:7687` |
 | `POSTGRES_URI` | PostgreSQL connection URI | `postgresql://...` |
 | `ELASTICSEARCH_URI` | Elasticsearch URI | `http://localhost:9200` |
+| `REDIS_URI` | Redis connection URI | `redis://localhost:6379` |
+| `API_KEY` | API key for authentication (optional) | _(disabled)_ |
 | `LOG_LEVEL` | Logging level | `INFO` |
 
 ## Documentation
@@ -263,7 +265,7 @@ Key environment variables (see `.env.example`):
 
 ## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](docs/contributing.md) for guidelines.
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -292,6 +294,6 @@ If you use this project in your research, please cite:
   title = {Computational Linguistic Stratigraphy},
   author = {Linguistic Stratigraphy Team},
   year = {2024},
-  url = {https://github.com/linguistic-stratigraphy/linguistic-stratigraphy}
+  url = {https://github.com/kase1111-hash/Lexicon}
 }
 ```

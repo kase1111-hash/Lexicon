@@ -3,9 +3,11 @@
 ## Development Setup
 
 1. Clone the repository
-2. Install dependencies: `pip install -e ".[dev]"`
-3. Start services: `docker-compose up -d`
+2. Install dependencies: `make install-dev`
+3. Start services: `docker compose up -d`
 4. Run setup: `./scripts/setup_databases.sh`
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full contribution guide.
 
 ## Code Style
 
@@ -17,18 +19,21 @@
 
 Run all checks:
 ```bash
-black src tests
-ruff check src tests
-mypy src
+make format          # Format with Black
+make lint            # Lint with Ruff
+make type-check      # Type check with mypy
+make security-check  # Security scan with Bandit
+make pre-commit      # Run all pre-commit hooks
 ```
 
 ## Testing
 
 Run tests with pytest:
 ```bash
-pytest tests/unit
-pytest tests/integration
-pytest  # all tests
+make test              # All tests
+make test-unit         # Unit tests only
+make test-integration  # Integration tests
+make test-cov          # With coverage report
 ```
 
 ## Pull Request Process

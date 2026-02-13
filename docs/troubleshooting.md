@@ -279,13 +279,13 @@ tail -f logs/app.log
 
 **Error:**
 ```json
-{"error": {"code": "AUTHENTICATION_ERROR", "message": "Invalid or missing API key"}}
+{"error": "AUTHENTICATION_ERROR", "message": "Invalid or missing API key", "details": {}}
 ```
 
 **Solution:**
 ```bash
 # Include API key in request
-curl -H "X-API-Key: your-api-key" http://localhost:8000/lsr/search
+curl -H "X-API-Key: your-api-key" http://localhost:8000/api/v1/lsr/search?form=water
 
 # Or disable authentication in .env
 API_KEY=
@@ -295,7 +295,7 @@ API_KEY=
 
 **Error:**
 ```json
-{"error": {"code": "RATE_LIMIT_ERROR", "message": "Rate limit exceeded"}}
+{"error": "RATE_LIMIT_ERROR", "message": "Rate limit exceeded", "details": {}}
 ```
 
 **Solution:**
@@ -365,7 +365,7 @@ curl http://localhost:8000/graphql -H "Content-Type: application/json" \
 3. **Optimize queries**
    ```bash
    # Use pagination
-   curl "http://localhost:8000/lsr/search?limit=50&offset=0"
+   curl "http://localhost:8000/api/v1/lsr/search?limit=50&offset=0"
 
    # Use GraphQL to fetch only needed fields
    ```
@@ -500,4 +500,4 @@ When reporting issues, include:
 4. Output of `make version-check`
 5. Relevant log excerpts
 
-Submit issues at: https://github.com/linguistic-stratigraphy/linguistic-stratigraphy/issues
+Submit issues at: https://github.com/kase1111-hash/Lexicon/issues

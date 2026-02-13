@@ -6,30 +6,18 @@ The Linguistic Stratigraphy API provides REST and GraphQL interfaces for queryin
 
 **Base URL:** `/api/v1`
 
-**Authentication:** API key (header) or OAuth2
+**Authentication:** API key via `X-API-Key` header (disabled by default; set `API_KEY` in `.env` to enable)
+
+For detailed endpoint documentation with request/response examples, see [api-reference.md](api-reference.md).
 
 ## REST Endpoints
 
 ### LSR Operations
 
-#### GET /lsr/{id}
+#### GET /api/v1/lsr/{id}
 Get a full Lexical State Record by ID.
 
-**Response:**
-```json
-{
-  "id": "uuid",
-  "form_orthographic": "string",
-  "form_phonetic": "string",
-  "language_code": "string",
-  "date_start": 0,
-  "date_end": 0,
-  "definitions": ["string"],
-  "confidence": 0.0
-}
-```
-
-#### GET /lsr/search
+#### GET /api/v1/lsr/search
 Search for LSRs matching criteria.
 
 **Parameters:**
@@ -41,21 +29,30 @@ Search for LSRs matching criteria.
 - `limit` (integer): Max results (default 20, max 100)
 - `offset` (integer): Pagination offset
 
-#### GET /lsr/{id}/etymology
+#### POST /api/v1/lsr/
+Create a new LSR record.
+
+#### DELETE /api/v1/lsr/{id}
+Delete an LSR record.
+
+#### GET /api/v1/lsr/{id}/etymology
 Get the full ancestor chain to proto-form.
 
-#### GET /lsr/{id}/descendants
+#### GET /api/v1/lsr/{id}/descendants
 Get the descendant tree.
 
 **Parameters:**
-- `depth` (integer): Max depth (default 3)
+- `depth` (integer): Max depth (default 3, max 10)
 
-#### GET /lsr/{id}/cognates
+#### GET /api/v1/lsr/{id}/cognates
 Get all cognate LSRs across languages.
+
+#### GET /api/v1/lsr/{id}/borrowings
+Get borrowing relationships (both incoming and outgoing).
 
 ### Analysis Endpoints
 
-#### POST /analyze/date-text
+#### POST /api/v1/analyze/date-text
 Predict the date range of a text based on vocabulary.
 
 **Request:**
@@ -66,18 +63,7 @@ Predict the date range of a text based on vocabulary.
 }
 ```
 
-**Response:**
-```json
-{
-  "predicted_date_range": [0, 0],
-  "confidence": 0.0,
-  "diagnostic_vocabulary": [
-    {"form": "string", "date_contribution": 0.0}
-  ]
-}
-```
-
-#### POST /analyze/detect-anachronisms
+#### POST /api/v1/analyze/detect-anachronisms
 Detect anachronistic vocabulary in a text.
 
 **Request:**
@@ -89,28 +75,51 @@ Detect anachronistic vocabulary in a text.
 }
 ```
 
-#### GET /analyze/contact-events
+#### GET /api/v1/analyze/contact-events
 Get detected language contact events.
 
-#### GET /analyze/semantic-drift
+**Parameters:**
+- `language` (string, required): ISO 639-3 language code
+- `date_start` (integer): Start year
+- `date_end` (integer): End year
+
+#### GET /api/v1/analyze/semantic-drift
 Get semantic drift trajectory for a word.
+
+**Parameters:**
+- `form` (string, required): Word form to analyze
+- `language` (string, required): ISO 639-3 language code
+
+#### GET /api/v1/analyze/compare-concept
+Compare how a concept is expressed across languages.
+
+**Parameters:**
+- `concept` (string, required): Concept to compare
+- `languages` (string, required): Comma-separated ISO 639-3 codes
 
 ### Graph Endpoints
 
-#### POST /graph/query
-Execute a graph query (Cypher or GraphQL).
+#### POST /api/v1/graph/query
+Execute a Cypher graph query (validated for safety).
 
-#### GET /graph/path
-Find all paths between two LSRs.
+#### GET /api/v1/graph/path
+Find all shortest paths between two LSRs.
+
+#### GET /api/v1/graph/etymology/{lsr_id}
+Get etymology chain via graph traversal.
+
+#### GET /api/v1/graph/cognates/{lsr_id}
+Get cognates via graph traversal.
+
+#### POST /api/v1/graph/bulk/export
+Export LSR data for a language.
 
 ## Rate Limits
 
-- Anonymous: 100 requests/hour
-- Authenticated: 10,000 requests/hour
-- Bulk exports: 10/day
+Default: 100 requests per minute per API key (configurable via environment variables).
 
 ## GraphQL
 
 The GraphQL endpoint is available at `/graphql`.
 
-See `schema.py` for the full schema definition.
+See `src/api/graphql/schema.py` for the full schema definition. You can use the GraphQL playground at `/graphql` in the browser for interactive exploration.
