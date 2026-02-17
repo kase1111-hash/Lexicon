@@ -90,10 +90,19 @@ class TestLoggingConfig:
 
     def test_default_values(self):
         """Test default logging configuration values."""
-        config = LoggingConfig()
-        assert config.log_level == "INFO"
-        assert config.log_format == "text"
-        assert config.slow_request_threshold_ms == 1000.0
+        # LoggingConfig uses env_prefix="" so it reads LOG_LEVEL etc. from
+        # environment. Clear those to test actual defaults.
+        logging_env_keys = {
+            "LOG_LEVEL", "LOG_FORMAT", "LOG_FILE",
+            "API_LOG_LEVEL", "PIPELINE_LOG_LEVEL", "DB_LOG_LEVEL",
+            "SLOW_REQUEST_THRESHOLD_MS",
+        }
+        clean_env = {k: v for k, v in os.environ.items() if k not in logging_env_keys}
+        with patch.dict(os.environ, clean_env, clear=True):
+            config = LoggingConfig()
+            assert config.log_level == "INFO"
+            assert config.log_format == "text"
+            assert config.slow_request_threshold_ms == 1000.0
 
     def test_log_level_validation_valid(self):
         """Test valid log level validation."""
