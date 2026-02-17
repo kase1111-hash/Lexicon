@@ -370,6 +370,10 @@ class SemanticDriftAnalyzer:
                 curr.embedding_full,
             )
 
+            # Skip if either embedding is missing (distance == -1.0)
+            if distance < 0:
+                continue
+
             # If significant distance, analyze the shift
             if distance > 0.2:  # Threshold for "significant" change
                 shift_type = self._classify_shift(
@@ -446,10 +450,11 @@ class SemanticDriftAnalyzer:
             emb2: Second embedding.
 
         Returns:
-            Cosine distance (0 = identical, 1 = orthogonal).
+            Cosine distance (0 = identical, 1 = orthogonal), or -1.0 if
+            either embedding is missing (caller should handle this sentinel).
         """
         if not emb1 or not emb2:
-            return 0.0
+            return -1.0
 
         # Pad to same length
         min_len = min(len(emb1), len(emb2))
@@ -487,7 +492,9 @@ class SemanticDriftAnalyzer:
 
         total = 0.0
         for i in range(1, len(embeddings)):
-            total += self._embedding_distance(embeddings[i - 1], embeddings[i])
+            dist = self._embedding_distance(embeddings[i - 1], embeddings[i])
+            if dist >= 0:  # Skip pairs where either embedding is missing
+                total += dist
 
         return total
 
@@ -543,6 +550,11 @@ class SemanticDriftAnalyzer:
         emb2 = traj2.points[-1].embedding_full if traj2.points else []
 
         current_divergence = self._embedding_distance(emb1, emb2)
+
+        # If embeddings are missing, fall back to drift comparison only
+        if current_divergence < 0:
+            drift_diff = abs(traj1.total_drift - traj2.total_drift)
+            return min(1.0, drift_diff)
 
         # Also consider drift patterns
         drift_diff = abs(traj1.total_drift - traj2.total_drift)

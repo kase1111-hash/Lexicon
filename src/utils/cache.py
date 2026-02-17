@@ -257,8 +257,9 @@ async def invalidate_lsr_cache(lsr_id: str) -> None:
         lsr_id: The LSR ID to invalidate.
     """
     cache = await get_cache()
-    # Delete specific LSR cache
-    await cache.delete(f"lexicon:lsr:{lsr_id}")
+    # Delete specific LSR cache using the same key format that get_lsr produces
+    cache_key = make_cache_key("lsr", lsr_id)
+    await cache.delete(cache_key)
     # Also delete related search caches (they might include this LSR)
     await cache.delete_pattern("lexicon:search:*")
 

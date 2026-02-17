@@ -70,9 +70,16 @@ class TestEdge:
 
     def test_edge_creation(self):
         """Test basic edge creation."""
+        from uuid import uuid4
+        src = uuid4()
+        tgt = uuid4()
         edge = Edge(
+            source_id=src,
+            target_id=tgt,
             relationship_type=RelationshipType.DESCENDS_FROM,
             confidence=0.95,
         )
+        assert edge.source_id == src
+        assert edge.target_id == tgt
         assert edge.relationship_type == RelationshipType.DESCENDS_FROM
         assert edge.confidence == 0.95

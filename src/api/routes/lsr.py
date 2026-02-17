@@ -114,6 +114,7 @@ async def search_lsr(
         language=language,
         date_start=date_start,
         date_end=date_end,
+        semantic_field=semantic_field,
         limit=limit,
         offset=offset,
     )
@@ -128,6 +129,7 @@ async def search_lsr(
         language=language,
         date_start=date_start,
         date_end=date_end,
+        semantic_field=semantic_field,
         limit=limit,
         offset=offset,
     )

@@ -579,14 +579,23 @@ class ContactDetector:
 
         return adaptations
 
+    @staticmethod
+    def _ordinal_suffix(n: int) -> str:
+        """Return the ordinal suffix for an integer (1st, 2nd, 3rd, 4th, ...)."""
+        if 11 <= (n % 100) <= 13:
+            return "th"
+        return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
     def _date_to_century_label(self, date: int) -> str:
         """Convert a year to a century label."""
         if date >= 0:
             century = (date // 100) + 1
-            return f"{century}th century CE"
+            suffix = self._ordinal_suffix(century)
+            return f"{century}{suffix} century CE"
         else:
             century = (abs(date) // 100) + 1
-            return f"{century}th century BCE"
+            suffix = self._ordinal_suffix(century)
+            return f"{century}{suffix} century BCE"
 
     def _century_label_to_range(self, label: str) -> tuple[int, int]:
         """Convert a century label back to a year range."""

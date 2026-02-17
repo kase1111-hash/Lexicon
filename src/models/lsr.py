@@ -210,8 +210,15 @@ class LSR(BaseModel):
         # Combine source databases
         self.source_databases = list(set(self.source_databases + other.source_databases))
 
-        # Combine alternate definitions
+        # Combine alternate definitions (including other's primary if different)
         existing_defs = set(self.definitions_alternate)
+        if (
+            other.definition_primary
+            and other.definition_primary != self.definition_primary
+            and other.definition_primary not in existing_defs
+        ):
+            self.definitions_alternate.append(other.definition_primary)
+            existing_defs.add(other.definition_primary)
         for defn in other.definitions_alternate:
             if defn not in existing_defs and defn != self.definition_primary:
                 self.definitions_alternate.append(defn)
