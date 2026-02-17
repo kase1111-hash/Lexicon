@@ -110,11 +110,14 @@ async def get_path(
     """
     logger.info(f"Finding paths from {from_lsr} to {to_lsr} (max {max_hops} hops)")
 
-    # Build relationship type filter
+    # Build relationship type filter (sanitize to prevent Cypher injection)
+    valid_rel_types = {"DESCENDS_FROM", "BORROWED_FROM", "COGNATE_OF", "SHIFTED_TO", "MERGED_WITH"}
     rel_filter = ""
     if relationship_types:
-        types = [t.strip() for t in relationship_types.split(",")]
-        rel_filter = ":" + "|".join(types)
+        types = [t.strip().upper() for t in relationship_types.split(",")]
+        types = [t for t in types if t in valid_rel_types]
+        if types:
+            rel_filter = ":" + "|".join(types)
 
     # Cypher query to find all shortest paths
     query = f"""

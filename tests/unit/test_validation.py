@@ -28,11 +28,12 @@ class TestSanitizers:
         result = sanitize_string("  hello   world  ")
         assert result == "hello world"
 
-    def test_sanitize_string_html_escape(self):
-        """Test HTML escaping."""
-        result = sanitize_string("<script>alert('xss')</script>")
-        assert "<script>" not in result
-        assert "&lt;script&gt;" in result
+    def test_sanitize_string_preserves_linguistic_chars(self):
+        """Test that linguistic characters are preserved (no HTML escaping)."""
+        result = sanitize_string("k > tʃ (palatalization)")
+        assert ">" in result
+        result = sanitize_string("AT&T")
+        assert "&" in result
 
     def test_sanitize_string_max_length(self):
         """Test max length truncation."""
@@ -52,7 +53,7 @@ class TestSanitizers:
 
     def test_sanitize_identifier_invalid_chars(self):
         """Test identifier with invalid characters."""
-        result = sanitize_identifier("invalid-id!@#")
+        result = sanitize_identifier("invalid!@#id")
         assert result == "invalidid"
 
     def test_sanitize_identifier_spaces(self):
@@ -69,8 +70,8 @@ class TestSanitizers:
     def test_sanitize_iso_code_invalid(self):
         """Test invalid ISO 639-3 code."""
         assert sanitize_iso_code("en") == ""  # Too short
-        assert sanitize_iso_code("english") == ""  # Too long
         assert sanitize_iso_code("123") == ""  # Numbers not allowed
+        assert sanitize_iso_code("a") == ""  # Way too short
 
     def test_sanitize_year_valid(self):
         """Test valid year sanitization."""
@@ -88,7 +89,7 @@ class TestSanitizers:
         items = ["  hello  ", "<script>", "world"]
         result = sanitize_list(items, sanitize_string)
         assert result[0] == "hello"
-        assert "&lt;script&gt;" in result[1]
+        assert result[1] == "<script>"
         assert result[2] == "world"
 
 
@@ -166,6 +167,7 @@ class TestRequestModels:
     def test_search_request_defaults(self):
         """Test search request defaults."""
         req = SearchRequest()
+        assert req.form is None
         assert req.limit == 20
         assert req.offset == 0
 

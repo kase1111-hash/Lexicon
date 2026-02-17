@@ -216,7 +216,7 @@ class TestConvertEntryToLSR:
             language="English",
             language_code="eng",
             definitions=["a greeting", "an exclamation"],
-            part_of_speech="interjection",
+            part_of_speech=["interjection"],
         )
 
         lsr = convert_entry_to_lsr(entry)
@@ -226,7 +226,7 @@ class TestConvertEntryToLSR:
         assert lsr.language_name == "English"
         assert lsr.definition_primary == "a greeting"
         assert lsr.definitions_alternate == ["an exclamation"]
-        assert lsr.part_of_speech == "interjection"
+        assert lsr.part_of_speech == ["interjection"]
         assert "wiktionary" in lsr.source_databases
 
     def test_conversion_with_date(self):
@@ -252,7 +252,7 @@ class TestConvertEntryToLSR:
             source_id="test-1",
             form="word",
             language="English",  # Full name
-            language_code=None,  # No code provided
+            language_code="",  # No code provided
         )
 
         lsr = convert_entry_to_lsr(entry)

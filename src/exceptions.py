@@ -213,8 +213,12 @@ class DatabaseError(LexiconError):
     http_status = 503
 
 
-class ConnectionError(DatabaseError):
-    """Raised when database connection fails."""
+class DatabaseConnectionError(DatabaseError):
+    """Raised when database connection fails.
+
+    Named DatabaseConnectionError to avoid shadowing Python's
+    builtin ConnectionError.
+    """
 
     error_code = "CONNECTION_ERROR"
 
@@ -230,6 +234,10 @@ class ConnectionError(DatabaseError):
         if database:
             details["database"] = database
         super().__init__(message=message, details=details, **kwargs)
+
+
+# Backward compatibility alias (deprecated - use DatabaseConnectionError)
+ConnectionError = DatabaseConnectionError  # noqa: A001
 
 
 class QueryError(DatabaseError):

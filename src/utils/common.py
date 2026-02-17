@@ -25,18 +25,20 @@ def flatten_list(nested: list[list[T]]) -> list[T]:
 
 def deduplicate_preserve_order(items: list[T]) -> list[T]:
     """Remove duplicates from a list while preserving order."""
-    seen: set[Any] = set()
+    seen_hashable: set[Any] = set()
+    seen_unhashable: list[Any] = []
     result: list[T] = []
     for item in items:
-        # Use hash for hashable items, id for unhashable
         try:
-            key = hash(item)
+            # Use the item itself as key for hashable items (not its hash)
+            if item not in seen_hashable:
+                seen_hashable.add(item)
+                result.append(item)
         except TypeError:
-            key = id(item)
-
-        if key not in seen:
-            seen.add(key)
-            result.append(item)
+            # Unhashable items: use equality check via linear scan
+            if item not in seen_unhashable:
+                seen_unhashable.append(item)
+                result.append(item)
     return result
 
 
@@ -65,17 +67,23 @@ def truncate_string(text: str, max_length: int, suffix: str = "...") -> str:
 
 def parse_year(year_str: str) -> int | None:
     """
-    Parse a year string, handling BCE notation.
+    Parse a year string, handling BCE notation and negative numbers.
 
     Examples:
         "1500" -> 1500
         "500 BCE" -> -500
         "200 BC" -> -200
+        "-500" -> -500
     """
     if not year_str:
         return None
 
     year_str = year_str.strip().upper()
+
+    # Check for negative number notation (e.g., "-500")
+    neg_match = re.match(r"^-(\d+)$", year_str)
+    if neg_match:
+        return -int(neg_match.group(1))
 
     # Check for BCE/BC notation
     bce_match = re.match(r"(\d+)\s*(BCE|BC)", year_str)
@@ -91,12 +99,14 @@ def parse_year(year_str: str) -> int | None:
 
 
 def year_to_string(year: int | None) -> str:
-    """Convert a year integer to string, handling BCE."""
+    """Convert a year integer to string, handling BCE and CE."""
     if year is None:
         return "unknown"
     if year < 0:
         return f"{abs(year)} BCE"
-    return str(year)
+    if year == 0:
+        return "0"
+    return f"{year} CE"
 
 
 def calculate_overlap_ratio(
@@ -150,26 +160,18 @@ def merge_dicts_deep(base: dict[str, Any], override: dict[str, Any]) -> dict[str
     return result
 
 
-class Singleton:
+class Singleton(type):
     """
-    Singleton base class for creating singleton instances.
+    Singleton metaclass for creating singleton instances.
 
     Usage:
-        class MyClass(Singleton):
+        class MyClass(metaclass=Singleton):
             pass
     """
 
-    _instances: dict[type, Any] | None = None
+    _instances: dict[type, Any] = {}
 
-    @classmethod
-    def _get_instances(cls) -> dict[type, Any]:
-        """Get the instances dict, initializing if needed."""
-        if Singleton._instances is None:
-            Singleton._instances = {}
-        return Singleton._instances
-
-    def __new__(cls, *args: Any, **kwargs: Any) -> Any:
-        instances = cls._get_instances()
-        if cls not in instances:
-            instances[cls] = super().__new__(cls)
-        return instances[cls]
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+        if cls not in cls._instances:
+            cls._instances[cls] = super().__call__(*args, **kwargs)
+        return cls._instances[cls]

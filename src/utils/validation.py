@@ -18,8 +18,13 @@ def sanitize_string(value: str, max_length: int | None = None) -> str:
 
     - Strips leading/trailing whitespace
     - Normalizes internal whitespace
+    - Removes control characters
     - Optionally truncates to max_length
-    - Escapes HTML entities
+
+    Note: Does NOT HTML-escape because this is used for linguistic data
+    stored in the database, not for direct HTML rendering. Characters like
+    '>' and '&' are legitimate in linguistic notation (e.g. "k > tʃ").
+    HTML escaping should be applied at the presentation layer instead.
     """
     if not value:
         return ""
@@ -27,8 +32,8 @@ def sanitize_string(value: str, max_length: int | None = None) -> str:
     # Strip and normalize whitespace
     result = " ".join(value.split())
 
-    # Escape HTML entities to prevent XSS
-    result = html.escape(result)
+    # Remove control characters (but preserve legitimate Unicode)
+    result = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", result)
 
     # Truncate if needed
     if max_length and len(result) > max_length:
@@ -41,15 +46,19 @@ def sanitize_identifier(value: str) -> str:
     """
     Sanitize an identifier (e.g., language code, ID).
 
-    - Only allows alphanumeric, hyphen, underscore
+    - Replaces spaces with underscores
+    - Only allows alphanumeric and underscore
     - Converts to lowercase
     - Max 50 characters
     """
     if not value:
         return ""
 
-    # Only allow safe characters
-    result = re.sub(r"[^a-zA-Z0-9_-]", "", value)
+    # Replace spaces with underscores before stripping
+    result = value.replace(" ", "_")
+
+    # Only allow safe characters (alphanumeric and underscore)
+    result = re.sub(r"[^a-zA-Z0-9_]", "", result)
 
     return result.lower()[:50]
 
@@ -60,13 +69,22 @@ def sanitize_iso_code(value: str) -> str:
 
     - Only allows letters and hyphens
     - Lowercase
+    - Must be at least 3 characters (ISO 639-3 minimum)
     - Max 10 characters (e.g., "gem-pro" for Proto-Germanic)
+    - Returns empty string for invalid codes
     """
     if not value:
         return ""
 
+    value = value.strip()
     result = re.sub(r"[^a-zA-Z-]", "", value)
-    return result.lower()[:10]
+    result = result.lower()[:10]
+
+    # ISO 639-3 codes must be at least 3 characters
+    if len(result) < 3:
+        return ""
+
+    return result
 
 
 def sanitize_year(value: Any) -> int | None:
@@ -75,12 +93,15 @@ def sanitize_year(value: Any) -> int | None:
 
     - Accepts int or string
     - Handles BCE notation
-    - Returns None for invalid input
+    - Returns None for out-of-range or invalid input
+    - Valid range: -10000 to 3000
     """
     if value is None:
         return None
 
     if isinstance(value, int):
+        if not -10000 <= value <= 3000:
+            return None
         return value
 
     if isinstance(value, str):
@@ -144,9 +165,11 @@ def is_valid_uuid(value: str) -> bool:
 
 
 def is_valid_year_range(start: int | None, end: int | None) -> bool:
-    """Check if a year range is valid."""
+    """Check if a year range is valid (within -10000 to 3000)."""
     if start is None or end is None:
         return True  # Partial ranges are allowed
+    if start < -10000 or end > 3000:
+        return False  # Out of reasonable bounds
     return start <= end
 
 
@@ -163,7 +186,10 @@ def is_safe_string(value: str) -> bool:
         r"javascript:",  # XSS
         r"on\w+=",  # Event handlers
         r"--",  # SQL comment
-        r";.*--",  # SQL injection
+        r";\s*drop\s",  # SQL injection (DROP)
+        r";\s*delete\s",  # SQL injection (DELETE)
+        r";\s*update\s",  # SQL injection (UPDATE)
+        r"'\s*or\s+.*=",  # SQL injection (OR-based)
         r"\$\{",  # Template injection
         r"\{\{",  # Template injection
     ]
@@ -222,17 +248,19 @@ class ISOLanguageCode(str):
 class SearchRequest(BaseModel):
     """Validated search request parameters."""
 
-    query: str = Field(..., min_length=1, max_length=500)
+    form: str | None = Field(default=None, max_length=200)
     language: str | None = Field(default=None, max_length=10)
     date_start: int | None = Field(default=None, ge=-10000, le=3000)
     date_end: int | None = Field(default=None, ge=-10000, le=3000)
     limit: int = Field(default=20, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
 
-    @field_validator("query")
+    @field_validator("form")
     @classmethod
-    def sanitize_query(cls, v: str) -> str:
-        return sanitize_string(v, max_length=500)
+    def sanitize_form(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return sanitize_string(v, max_length=200)
 
     @field_validator("language")
     @classmethod
