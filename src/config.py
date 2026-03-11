@@ -81,8 +81,8 @@ class APIConfig(BaseSettings):
     jwt_expire_minutes: int = 60
 
     # CORS
-    cors_origins: str = "*"
-    cors_allow_credentials: bool = True
+    cors_origins: str = "http://localhost:3000,http://localhost:8080"
+    cors_allow_credentials: bool = False
 
     # Rate limiting (enabled by default for security)
     rate_limit_enabled: bool = True
@@ -197,6 +197,8 @@ class Settings(BaseSettings):
                 errors.append("DEBUG must be False in production")
             if self.api.cors_origins == "*":
                 errors.append("CORS_ORIGINS should not be '*' in production")
+            if not self.api.api_key:
+                errors.append("API_KEY is required in production")
             if not self.api.rate_limit_enabled:
                 errors.append("RATE_LIMIT_ENABLED should be True in production")
 

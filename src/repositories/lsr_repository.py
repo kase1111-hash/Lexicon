@@ -19,6 +19,17 @@ from src.utils.db import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
+# Allowlist of valid relationship types for Cypher queries.
+# Prevents Cypher injection via relationship type interpolation.
+VALID_RELATIONSHIP_TYPES = frozenset({
+    "DESCENDS_FROM",
+    "BORROWED_FROM",
+    "COGNATE_OF",
+    "SHIFTED_TO",
+    "MERGED_WITH",
+    "RELATED_TO",
+})
+
 # Elasticsearch index configuration
 ES_INDEX_NAME = "lexicon_lsr"
 ES_INDEX_SETTINGS = {
@@ -376,6 +387,10 @@ class LSRRepository:
         by_type: dict[str, list[dict[str, Any]]] = {}
         for rel in relationships:
             rel_type = rel.get("type", "RELATED_TO")
+            if rel_type not in VALID_RELATIONSHIP_TYPES:
+                logger.warning(f"Skipping invalid relationship type: {rel_type!r}")
+                result.failed += 1
+                continue
             by_type.setdefault(rel_type, []).append(rel)
 
         for rel_type, rels in by_type.items():

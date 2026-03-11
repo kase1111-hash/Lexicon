@@ -369,10 +369,37 @@ class GraphQueryRequest(BaseModel):
     @field_validator("query")
     @classmethod
     def validate_query(cls, v: str) -> str:
-        # Basic injection protection for Cypher queries
-        dangerous = ["DETACH DELETE", "DROP", "CREATE INDEX", "CREATE CONSTRAINT"]
-        v_upper = v.upper()
+        v_upper = v.upper().strip()
+
+        # Allowlist: query must start with a read-only clause
+        allowed_starts = (
+            "MATCH", "RETURN", "WITH", "OPTIONAL MATCH",
+            "UNWIND", "EXPLAIN", "PROFILE",
+        )
+        if not any(v_upper.startswith(prefix) for prefix in allowed_starts):
+            raise ValueError(
+                "Query must start with a read-only clause (MATCH, RETURN, WITH, UNWIND)"
+            )
+
+        # Blocklist: reject write operations and dangerous procedures
+        dangerous = [
+            "DETACH DELETE",
+            "DELETE ",
+            "DROP ",
+            "CREATE ",
+            "MERGE ",
+            "SET ",
+            "REMOVE ",
+            "FOREACH",
+            "LOAD CSV",
+            "CALL APOC",
+            "CALL DBMS",
+            "CREATE INDEX",
+            "CREATE CONSTRAINT",
+        ]
         for pattern in dangerous:
             if pattern in v_upper:
-                raise ValueError(f"Query contains disallowed operation: {pattern}")
+                raise ValueError(
+                    f"Query contains disallowed operation: {pattern.strip()}"
+                )
         return v
