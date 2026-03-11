@@ -187,6 +187,11 @@ app.add_middleware(
 
 # API key authentication middleware
 api_key = settings.api.api_key.get_secret_value() if settings.api.api_key else None
+if not api_key:
+    logger.warning(
+        "API key authentication is DISABLED. "
+        "Set API_KEY environment variable to enable authentication."
+    )
 app.add_middleware(
     APIKeyAuthMiddleware,
     api_key=api_key,
@@ -346,12 +351,16 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         client_ip=request.client.host if request.client else None,
     )
 
+    details = {}
+    if settings.error_tracking.debug:
+        details["type"] = type(exc).__name__
+
     return JSONResponse(
         status_code=500,
         content={
             "error": "INTERNAL_ERROR",
             "message": "An unexpected error occurred",
-            "details": {"type": type(exc).__name__},
+            "details": details,
         },
     )
 

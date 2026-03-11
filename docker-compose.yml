@@ -11,8 +11,8 @@ services:
       - NEO4J_dbms_memory_heap_initial__size=512m
       - NEO4J_dbms_memory_heap_max__size=2G
     ports:
-      - "7474:7474"  # HTTP
-      - "7687:7687"  # Bolt
+      - "127.0.0.1:7474:7474"  # HTTP (localhost only)
+      - "127.0.0.1:7687:7687"  # Bolt (localhost only)
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -41,7 +41,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-ls_user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"  # localhost only
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -68,13 +68,13 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=true
-      - xpack.security.http.ssl.enabled=false
-      - xpack.security.transport.ssl.enabled=false
+      - xpack.security.http.ssl.enabled=false      # SSL disabled for local dev; enabled in production overlay
+      - xpack.security.transport.ssl.enabled=false  # SSL disabled for local dev; enabled in production overlay
       - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD is required}
       - "ES_JAVA_OPTS=-Xms512m -Xmx1g"
     ports:
-      - "9200:9200"
-      - "9300:9300"
+      - "127.0.0.1:9200:9200"  # localhost only
+      - "127.0.0.1:9300:9300"  # localhost only
     volumes:
       - es_data:/usr/share/elasticsearch/data
     healthcheck:
@@ -99,7 +99,7 @@ services:
     container_name: ls-redis
     command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"  # localhost only
     volumes:
       - redis_data:/data
     healthcheck:

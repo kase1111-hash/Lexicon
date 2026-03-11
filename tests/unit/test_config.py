@@ -58,7 +58,7 @@ class TestAPIConfig:
         config = APIConfig()
         assert config.api_host == "0.0.0.0"
         assert config.api_port == 8000
-        assert config.cors_origins == "*"
+        assert config.cors_origins == "http://localhost:3000,http://localhost:8080"
 
     def test_cors_origins_list_wildcard(self):
         """Test CORS origins list with wildcard."""

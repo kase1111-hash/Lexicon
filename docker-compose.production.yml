@@ -64,6 +64,14 @@ services:
 
   elasticsearch:
     restart: always
+    environment:
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.transport.ssl.enabled=true
+      # Mount TLS certificates via volumes:
+      # - xpack.security.http.ssl.certificate=/usr/share/elasticsearch/config/certs/http.crt
+      # - xpack.security.http.ssl.key=/usr/share/elasticsearch/config/certs/http.key
+      # - xpack.security.transport.ssl.certificate=/usr/share/elasticsearch/config/certs/transport.crt
+      # - xpack.security.transport.ssl.key=/usr/share/elasticsearch/config/certs/transport.key
     deploy:
       resources:
         limits:

@@ -51,7 +51,6 @@ jobs:
 
       - name: Run mypy
         run: mypy src --ignore-missing-imports
-        continue-on-error: true  # Type coverage is improving
 
   security:
     name: Security Scan
@@ -69,6 +68,12 @@ jobs:
 
       - name: Run bandit security scan
         run: bandit -r src -c pyproject.toml
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit dependencies for known vulnerabilities
+        run: pip-audit -r requirements.txt
 
   test:
     name: Test

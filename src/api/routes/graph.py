@@ -61,10 +61,17 @@ async def execute_query(
 
     logger.info(f"Executing graph query: {query_input.query[:100]}...")
 
+    async def _run_read_query(tx, query, parameters):
+        result = await tx.run(query, parameters)
+        records = await result.fetch(1000)  # Limit to 1000 results
+        return records
+
     try:
         async with db.neo4j_session() as session:
-            result = await session.run(query_input.query, query_input.parameters)
-            records = await result.fetch(1000)  # Limit to 1000 results
+            # Use explicit read transaction so Neo4j rejects any write operations
+            records = await session.execute_read(
+                _run_read_query, query_input.query, query_input.parameters
+            )
 
             # Convert records to serializable format
             results = []
@@ -75,21 +82,18 @@ async def execute_query(
                     row[key] = _serialize_neo4j_value(value)
                 results.append(row)
 
-            # Get result summary
-            summary = await result.consume()
-
             return {
                 "results": results,
                 "count": len(results),
                 "query": query_input.query,
-                "query_type": summary.query_type if hasattr(summary, 'query_type') else "read",
+                "query_type": "read",
             }
 
     except RuntimeError as e:
         raise DatabaseError(message=f"Neo4j not connected: {e}")
     except Exception as e:
         logger.error(f"Graph query failed: {e}")
-        raise DatabaseError(message=f"Query execution failed: {e}")
+        raise DatabaseError(message="Query execution failed")
 
 
 @router.get("/path")
@@ -154,7 +158,7 @@ async def get_path(
         raise DatabaseError(message=f"Neo4j not connected: {e}")
     except Exception as e:
         logger.error(f"Path finding failed: {e}")
-        raise DatabaseError(message=f"Path finding failed: {e}")
+        raise DatabaseError(message="Path finding failed")
 
 
 @router.get("/etymology/{lsr_id}")
@@ -206,7 +210,7 @@ async def get_etymology_chain(
         raise DatabaseError(message=f"Neo4j not connected: {e}")
     except Exception as e:
         logger.error(f"Etymology chain retrieval failed: {e}")
-        raise DatabaseError(message=f"Etymology chain retrieval failed: {e}")
+        raise DatabaseError(message="Etymology chain retrieval failed")
 
 
 @router.get("/cognates/{lsr_id}")
@@ -261,7 +265,7 @@ async def get_cognates(
         raise DatabaseError(message=f"Neo4j not connected: {e}")
     except Exception as e:
         logger.error(f"Cognate retrieval failed: {e}")
-        raise DatabaseError(message=f"Cognate retrieval failed: {e}")
+        raise DatabaseError(message="Cognate retrieval failed")
 
 
 class BulkExportRequest(BaseModel):
@@ -311,7 +315,7 @@ async def create_bulk_export(
         raise DatabaseError(message=f"Neo4j not connected: {e}")
     except Exception as e:
         logger.error(f"Bulk export failed: {e}")
-        raise DatabaseError(message=f"Bulk export failed: {e}")
+        raise DatabaseError(message="Bulk export failed")
 
 
 @router.get("/bulk/status/{job_id}")
