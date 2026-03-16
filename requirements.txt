@@ -15,7 +15,7 @@ elasticsearch==8.17.1
 redis==5.2.1
 
 # Numeric
-numpy==1.26.4
+numpy==2.4.3
 
 # API
 fastapi==0.115.8
