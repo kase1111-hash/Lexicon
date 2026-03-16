@@ -12,7 +12,7 @@ aiohttp==3.11.14
 neo4j==5.27.0
 asyncpg==0.30.0
 elasticsearch==8.17.1
-redis==5.2.1
+redis==7.3.0
 
 # Numeric
 numpy==1.26.4
