@@ -3,14 +3,14 @@
 # For development: pip install -r requirements-dev.txt
 
 # Core
-pydantic==2.10.6
-pydantic-settings==2.7.1
+pydantic==2.12.5
+pydantic-settings==2.13.1
 httpx==0.28.1
-aiohttp==3.11.14
+aiohttp==3.13.4
 
 # Databases
 neo4j==5.27.0
-asyncpg==0.30.0
+asyncpg==0.31.0
 elasticsearch==8.17.1
 redis==5.2.1
 
@@ -18,15 +18,15 @@ redis==5.2.1
 numpy==1.26.4
 
 # API
-fastapi==0.115.8
-uvicorn==0.34.0
-strawberry-graphql==0.256.0
+fastapi==0.135.2
+uvicorn==0.42.0
+strawberry-graphql==0.312.2
 
 # Error Tracking & Monitoring
-sentry-sdk[fastapi]==2.19.2
+sentry-sdk[fastapi]==2.56.0
 
 # Utils
 pywikibot==9.6.0
 lxml==5.3.1
-tqdm==4.67.1
-python-Levenshtein==0.26.1
+tqdm==4.67.3
+python-Levenshtein==0.27.3
