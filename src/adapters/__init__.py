@@ -2,5 +2,4 @@
 
 from .base import RawLexicalEntry, SourceAdapter
 
-
 __all__ = ["RawLexicalEntry", "SourceAdapter"]

@@ -4,15 +4,15 @@ These tests verify complete workflows through multiple system components,
 ensuring the entire pipeline works correctly from input to output.
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
 
 from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR
 from src.pipelines.entity_resolution import (
     EntityResolver,
     ResolutionAction,
-    SimilarityWeights,
     convert_entry_to_lsr,
 )
 
@@ -149,7 +149,7 @@ class TestDataIngestionWorkflow:
         )
 
         # Merge
-        merge_log = entity_resolver.merge_lsrs(water_lsr, corpus_entry)
+        entity_resolver.merge_lsrs(water_lsr, corpus_entry)
 
         # Verify merge happened
         assert "corpus" in water_lsr.source_databases
@@ -297,7 +297,10 @@ class TestEntityResolutionScenarios:
         if result.existing_id:
             matched_lsr = resolver_with_data._lsr_store.get(result.existing_id)
             if matched_lsr:
-                assert matched_lsr.language_code == "ita" or result.action == ResolutionAction.CREATE_NEW
+                assert (
+                    matched_lsr.language_code == "ita"
+                    or result.action == ResolutionAction.CREATE_NEW
+                )
 
     def test_same_form_different_meaning(self):
         """Test handling of homographs (same form, different meaning)."""
@@ -372,7 +375,7 @@ class TestConfigurationWorkflow:
 
     def test_settings_load_workflow(self):
         """Test complete settings loading workflow."""
-        from src.config import Settings, get_settings
+        from src.config import get_settings
 
         # Load settings
         settings = get_settings()
@@ -418,7 +421,7 @@ class TestConfigurationWorkflow:
 
         # Any password fields should be masked
         password_fields = find_passwords(masked)
-        for key, value in password_fields:
+        for _key, value in password_fields:
             if value:  # Only check non-empty values
                 assert value == "***MASKED***" or not value
 
@@ -468,7 +471,7 @@ class TestLoggingWorkflow:
 
     def test_logging_setup_workflow(self):
         """Test logging setup and configuration."""
-        from src.utils.logging import setup_logging, get_logger
+        from src.utils.logging import get_logger, setup_logging
 
         # Setup logging
         setup_logging(level="DEBUG", json_format=False)
@@ -482,7 +485,7 @@ class TestLoggingWorkflow:
 
     def test_request_id_tracking_workflow(self):
         """Test request ID tracking through logging."""
-        from src.utils.logging import set_request_id, get_request_id, clear_request_id
+        from src.utils.logging import clear_request_id, get_request_id, set_request_id
 
         # Set request ID
         req_id = set_request_id()

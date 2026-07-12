@@ -47,7 +47,7 @@ def sample_raw_entry_data():
         "language": "English",
         "language_code": "eng",
         "definitions": ["a colorless liquid", "a body of water"],
-        "part_of_speech": "noun",
+        "part_of_speech": ["noun"],
         "date_attested": 1200,
     }
 

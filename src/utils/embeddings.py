@@ -35,7 +35,8 @@ class EmbeddingUtils:
         norm = np.linalg.norm(arr)
         if norm == 0:
             return vector
-        return (arr / norm).tolist()
+        normalized: list[float] = (arr / norm).tolist()
+        return normalized
 
     @staticmethod
     def average_embeddings(embeddings: list[list[float]]) -> list[float]:
@@ -43,4 +44,5 @@ class EmbeddingUtils:
         if not embeddings:
             return []
         arr = np.array(embeddings)
-        return np.mean(arr, axis=0).tolist()
+        averaged: list[float] = np.mean(arr, axis=0).tolist()
+        return averaged

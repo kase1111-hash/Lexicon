@@ -4,9 +4,9 @@ These tests ensure data integrity is maintained across
 operations and that no data corruption occurs.
 """
 
-import pytest
 from copy import deepcopy
-from uuid import uuid4
+
+import pytest
 
 from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR, Attestation
@@ -109,10 +109,7 @@ class TestLSRDataIntegrity:
 
     def test_uuid_uniqueness(self):
         """Test that UUIDs are unique across multiple LSRs."""
-        lsrs = [
-            LSR(form_orthographic=f"word{i}", language_code="eng")
-            for i in range(100)
-        ]
+        lsrs = [LSR(form_orthographic=f"word{i}", language_code="eng") for i in range(100)]
 
         ids = [lsr.id for lsr in lsrs]
         # All IDs should be unique
@@ -299,9 +296,7 @@ class TestDeepCopyIntegrity:
             definition_primary="a test",
             definitions_alternate=["examination"],
             source_databases=["wiktionary", "corpus"],
-            attestations=[
-                Attestation(text_excerpt="sample", text_date=1500)
-            ],
+            attestations=[Attestation(text_excerpt="sample", text_date=1500)],
         )
 
         copied = deepcopy(original)

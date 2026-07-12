@@ -2,14 +2,13 @@
 
 import secrets
 import time
-from collections.abc import Callable
 
 from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse
+from starlette.types import ASGIApp
 
 from src.utils.logging import clear_request_id, get_logger, set_request_id
-
 
 logger = get_logger(__name__)
 
@@ -27,7 +26,7 @@ PUBLIC_PATHS = {
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Middleware for logging HTTP requests and responses."""
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         """Process request with logging."""
         # Get or generate request ID
         request_id = request.headers.get("X-Request-ID") or set_request_id()
@@ -96,7 +95,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 class PerformanceLoggingMiddleware(BaseHTTPMiddleware):
     """Middleware for logging slow requests."""
 
-    def __init__(self, app, slow_request_threshold_ms: float = 1000.0):
+    def __init__(self, app: ASGIApp, slow_request_threshold_ms: float = 1000.0):
         """
         Initialize middleware.
 
@@ -107,7 +106,7 @@ class PerformanceLoggingMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.slow_request_threshold_ms = slow_request_threshold_ms
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         """Process request with performance monitoring."""
         start_time = time.perf_counter()
 
@@ -139,7 +138,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app,
+        app: ASGIApp,
         api_key: str | None = None,
         header_name: str = "X-API-Key",
         enabled: bool = True,
@@ -168,7 +167,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         public_prefixes = ("/docs", "/redoc", "/openapi")
         return path.startswith(public_prefixes)
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         """Process request with API key authentication."""
         # Skip authentication if disabled
         if not self.enabled:
@@ -202,7 +201,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             )
 
         # Validate API key using constant-time comparison to prevent timing attacks
-        if not secrets.compare_digest(provided_key, self.api_key):
+        if not self.api_key or not secrets.compare_digest(provided_key, self.api_key):
             logger.warning(
                 f"Invalid API key for {request.method} {request.url.path}",
                 extra={

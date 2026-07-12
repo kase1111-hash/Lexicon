@@ -4,9 +4,9 @@ These tests ensure edge cases and boundary conditions
 don't cause unexpected behavior in the LSR model.
 """
 
-import pytest
-from datetime import datetime
 from uuid import uuid4
+
+import pytest
 
 from src.models.lsr import LSR, Attestation, DateSource, Register
 
@@ -73,7 +73,7 @@ class TestLSRBoundaryConditions:
             form_orthographic="aqua",
             language_code="lat",
             date_start=-500,  # 500 BCE
-            date_end=-100,    # 100 BCE
+            date_end=-100,  # 100 BCE
         )
         assert lsr.date_start == -500
         assert lsr.date_end == -100
@@ -264,7 +264,7 @@ class TestLSRMergeEdgeCases:
             form_orthographic="test",
             language_code="eng",
             date_start=1400,  # Earlier
-            date_end=1800,    # Later
+            date_end=1800,  # Later
         )
 
         lsr1.merge_with(lsr2)

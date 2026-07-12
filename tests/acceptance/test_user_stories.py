@@ -4,8 +4,9 @@ These tests validate complete user journeys through the system,
 ensuring that the application meets user requirements.
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
 
 from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR
@@ -307,8 +308,7 @@ class TestUserStorySemanticDrift:
 
     def test_semantic_trajectory_dataclass_structure(self):
         """Verify SemanticTrajectory has required fields."""
-        from src.analysis.semantic_drift import SemanticTrajectory, TrajectoryPoint
-        from uuid import uuid4
+        from src.analysis.semantic_drift import SemanticTrajectory
 
         trajectory = SemanticTrajectory(
             lsr_id=uuid4(),
@@ -386,8 +386,7 @@ class TestUserStoryLSROperations:
         # Search logic
         form_query = "water"
         matches = [
-            lsr for lsr in sample_lsr_store.values()
-            if lsr.form_normalized == form_query.lower()
+            lsr for lsr in sample_lsr_store.values() if lsr.form_normalized == form_query.lower()
         ]
 
         assert len(matches) >= 1
@@ -396,10 +395,7 @@ class TestUserStoryLSROperations:
     def test_filter_by_language(self, sample_lsr_store):
         """Verify language filter works correctly."""
         lang_query = "eng"
-        matches = [
-            lsr for lsr in sample_lsr_store.values()
-            if lsr.language_code == lang_query
-        ]
+        matches = [lsr for lsr in sample_lsr_store.values() if lsr.language_code == lang_query]
 
         assert len(matches) >= 1
         assert all(m.language_code == "eng" for m in matches)
@@ -411,7 +407,8 @@ class TestUserStoryLSROperations:
         date_end = 1300
 
         matches = [
-            lsr for lsr in sample_lsr_store.values()
+            lsr
+            for lsr in sample_lsr_store.values()
             if lsr.date_start is not None
             and lsr.date_end is not None
             and not (lsr.date_end < date_start or lsr.date_start > date_end)

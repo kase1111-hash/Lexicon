@@ -11,20 +11,15 @@ Usage:
 """
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
-from uuid import UUID
 
-from src.adapters.base import RawLexicalEntry
 from src.analysis.contact_detection import ContactDetector
 from src.analysis.dating import TextDating
 from src.analysis.semantic_drift import SemanticDriftAnalyzer
-from src.models.lsr import LSR
-from src.pipelines.entity_resolution import EntityResolver, ResolutionAction, convert_entry_to_lsr
 from src.pipelines.relationship_extraction import RelationshipExtractor
-from src.pipelines.validation import ValidationResult, Validator
+from src.pipelines.validation import Validator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,7 +106,8 @@ def _analyze_date_text(args: argparse.Namespace) -> None:
     print(f"Tokens matched: {result.matched_tokens}")
     print(f"Method: {result.method}")
     if result.diagnostic_vocabulary:
-        print(f"Diagnostic vocabulary: {', '.join(result.diagnostic_vocabulary[:10])}")
+        words = ", ".join(w["word"] for w in result.diagnostic_vocabulary[:10])
+        print(f"Diagnostic vocabulary: {words}")
 
 
 def _analyze_anachronisms(args: argparse.Namespace) -> None:
@@ -148,8 +144,10 @@ def _analyze_contact(args: argparse.Namespace) -> None:
     print(f"Language: {language}")
     print(f"Contact events detected: {len(events)}")
     for event in events[:5]:
-        print(f"  {event.donor_language} -> {event.recipient_language}: "
-              f"{event.vocabulary_count} words, confidence={event.confidence:.2f}")
+        print(
+            f"  {event.donor_language} -> {event.recipient_language}: "
+            f"{event.vocabulary_count} words, confidence={event.confidence:.2f}"
+        )
 
 
 def _analyze_drift(args: argparse.Namespace) -> None:
@@ -179,7 +177,7 @@ def _analyze_drift(args: argparse.Namespace) -> None:
 def _get_text(args: argparse.Namespace) -> str:
     """Get text from --text or --file argument."""
     if args.text:
-        return args.text
+        return str(args.text)
     elif hasattr(args, "file") and args.file:
         path = Path(args.file)
         if not path.exists():
@@ -212,7 +210,7 @@ def cmd_validate(args: argparse.Namespace) -> None:
         for issue in report.issues:
             print(f"  [{issue['severity']}] {issue['field']}: {issue['message']}")
     if report.recommendations:
-        print(f"Recommendations:")
+        print("Recommendations:")
         for rec in report.recommendations:
             print(f"  - {rec}")
 
@@ -230,9 +228,11 @@ def cmd_extract_relationships(args: argparse.Namespace) -> None:
     print(f"Extracted {len(raw_rels)} relationships:")
     for rel in raw_rels:
         marker = "*" if rel.is_reconstructed else ""
-        print(f"  {rel.relationship_type.value}: -> {marker}{rel.target_form} "
-              f"({rel.target_language}/{rel.target_language_code}) "
-              f"confidence={rel.confidence:.1f}")
+        print(
+            f"  {rel.relationship_type.value}: -> {marker}{rel.target_form} "
+            f"({rel.target_language}/{rel.target_language_code}) "
+            f"confidence={rel.confidence:.1f}"
+        )
         print(f"    Evidence: {rel.evidence}")
 
 
@@ -265,8 +265,13 @@ def main() -> None:
 
     # ingest
     p_ingest = subparsers.add_parser("ingest", help="Ingest from Wiktionary or WOLD")
-    p_ingest.add_argument("--source", type=str, choices=["wiktionary", "wold"],
-                          default="wiktionary", help="Data source")
+    p_ingest.add_argument(
+        "--source",
+        type=str,
+        choices=["wiktionary", "wold"],
+        default="wiktionary",
+        help="Data source",
+    )
     p_ingest.add_argument("--words", type=str, help="Path to word list file")
     p_ingest.add_argument("--word", type=str, help="Single word to ingest")
     p_ingest.add_argument("--language", type=str, help="Language filter (e.g. 'English')")
@@ -282,7 +287,9 @@ def main() -> None:
 
     # analyze
     p_analyze = subparsers.add_parser("analyze", help="Run analysis")
-    p_analyze.add_argument("analysis_type", choices=["date-text", "anachronisms", "contact", "drift"])
+    p_analyze.add_argument(
+        "analysis_type", choices=["date-text", "anachronisms", "contact", "drift"]
+    )
     p_analyze.add_argument("--text", type=str, help="Text to analyze")
     p_analyze.add_argument("--file", type=str, help="File containing text")
     p_analyze.add_argument("--language", type=str, help="Language code")

@@ -5,28 +5,26 @@ handle edge cases correctly without breaking.
 """
 
 import pytest
-from unittest.mock import patch
-import os
 
 from src.config import (
     APIConfig,
     DatabaseConfig,
-    LoggingConfig,
     ErrorTrackingConfig,
+    LoggingConfig,
     Settings,
     get_settings,
     reload_settings,
 )
 from src.exceptions import (
-    ValidationError,
     InvalidDateRangeError,
     InvalidLanguageCodeError,
     LexiconError,
+    ValidationError,
 )
 from src.utils.validation import (
-    sanitize_string,
-    sanitize_iso_code,
     is_valid_year_range,
+    sanitize_iso_code,
+    sanitize_string,
 )
 
 
@@ -120,9 +118,7 @@ class TestConfigurationEdgeCases:
         assert config_wildcard.cors_origins_list == ["*"]
 
         # Multiple origins
-        config_multi = APIConfig(
-            cors_origins="http://localhost:3000,http://localhost:8080"
-        )
+        config_multi = APIConfig(cors_origins="http://localhost:3000,http://localhost:8080")
         assert len(config_multi.cors_origins_list) == 2
 
         # Single origin
@@ -144,10 +140,19 @@ class TestValidationEdgeCases:
         assert result == ""
 
     def test_sanitize_string_with_html(self):
-        """Test sanitizing string with HTML."""
+        """Test that HTML is preserved (escaping happens at the presentation layer).
+
+        sanitize_string must not corrupt linguistic notation like "k > tʃ",
+        so HTML content passes through unchanged apart from whitespace
+        normalization and control-character removal.
+        """
         result = sanitize_string("<script>alert('xss')</script>")
-        assert "<script>" not in result
-        assert "alert" not in result or "<" not in result
+        assert result == "<script>alert('xss')</script>"
+
+    def test_sanitize_string_preserves_linguistic_notation(self):
+        """Test that sound-change notation is not HTML-escaped."""
+        result = sanitize_string("k > tʃ / _i")
+        assert result == "k > tʃ / _i"
 
     def test_sanitize_string_max_length(self):
         """Test sanitizing string with max length."""

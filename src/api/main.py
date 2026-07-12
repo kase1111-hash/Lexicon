@@ -2,11 +2,12 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import ValidationError as PydanticValidationError
 
 from src.config import get_settings, is_production
@@ -30,7 +31,6 @@ from src.utils.logging import get_logger, setup_logging
 
 from .middleware import APIKeyAuthMiddleware, PerformanceLoggingMiddleware, RequestLoggingMiddleware
 from .routes import analysis, graph, lsr
-
 
 # Load configuration
 settings = get_settings()
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
     logger.info("Starting Linguistic Stratigraphy API")
     try:
-        db = await get_db()
+        await get_db()
         logger.info("Database connections established")
     except Exception as e:
         logger.warning(f"Could not connect to all databases: {e}")
@@ -229,9 +229,7 @@ async def validation_error_handler(request: Request, exc: ValidationError) -> JS
 
 
 @app.exception_handler(RequestValidationError)
-async def request_validation_handler(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
+async def request_validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Handle FastAPI request validation errors."""
     errors = []
     for error in exc.errors():
@@ -390,7 +388,7 @@ async def health() -> dict:
 
     Returns the health status of the API and its dependencies.
     """
-    health_status = {
+    health_status: dict[str, Any] = {
         "status": "healthy",
         "api": "up",
         "databases": {},
@@ -414,15 +412,13 @@ async def health() -> dict:
     return health_status
 
 
-@app.get("/metrics", tags=["Monitoring"])
-async def get_metrics() -> "PlainTextResponse":
+@app.get("/metrics", tags=["Monitoring"], response_class=PlainTextResponse)
+async def get_metrics() -> PlainTextResponse:
     """
     Prometheus-compatible metrics endpoint.
 
     Returns operational metrics in Prometheus text format.
     """
-    from fastapi.responses import PlainTextResponse
-
     from src.utils.metrics import metrics
 
     return PlainTextResponse(

@@ -6,8 +6,8 @@ relationships. Works with both clean text and raw Wiktionary template data.
 
 import logging
 import re
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass
+from enum import StrEnum
 from uuid import UUID
 
 from Levenshtein import ratio as levenshtein_ratio
@@ -15,7 +15,7 @@ from Levenshtein import ratio as levenshtein_ratio
 logger = logging.getLogger(__name__)
 
 
-class RelationshipType(str, Enum):
+class RelationshipType(StrEnum):
     """Types of relationships between LSRs."""
 
     DESCENDS_FROM = "DESCENDS_FROM"
@@ -97,13 +97,25 @@ CODE_TO_LANGUAGE = {v: k for k, v in LANGUAGE_CODE_MAP.items()}
 
 # Patterns that indicate borrowing vs. inheritance
 BORROWING_INDICATORS = {
-    "borrowed", "loan", "loanword", "calque", "borrowed from",
-    "taken from", "adopted from", "through", "via",
+    "borrowed",
+    "loan",
+    "loanword",
+    "calque",
+    "borrowed from",
+    "taken from",
+    "adopted from",
+    "through",
+    "via",
 }
 
 INHERITANCE_INDICATORS = {
-    "from", "inherited from", "derives from", "derived from",
-    "descended from", "descends from", "cognate with",
+    "from",
+    "inherited from",
+    "derives from",
+    "derived from",
+    "descended from",
+    "descends from",
+    "cognate with",
 }
 
 # Known language names for pattern matching (sorted by length desc to match longest first)
@@ -135,9 +147,7 @@ _COGNATE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-_LANGUAGE_PATTERN = re.compile(
-    r"\b(" + _LANG_ALT + r")\b"
-)
+_LANGUAGE_PATTERN = re.compile(r"\b(" + _LANG_ALT + r")\b")
 
 
 class RelationshipExtractor:
@@ -200,8 +210,11 @@ class RelationshipExtractor:
             lang_name = match.group(1).strip()
             form = match.group(2).strip()
             rel = self._make_raw_relationship(
-                form, lang_name, RelationshipType.BORROWED_FROM,
-                confidence=0.8, evidence=match.group(0),
+                form,
+                lang_name,
+                RelationshipType.BORROWED_FROM,
+                confidence=0.8,
+                evidence=match.group(0),
             )
             if rel:
                 relationships.append(rel)
@@ -211,8 +224,11 @@ class RelationshipExtractor:
             lang_name = match.group(1).strip()
             form = match.group(2).strip()
             rel = self._make_raw_relationship(
-                form, lang_name, RelationshipType.COGNATE_OF,
-                confidence=0.7, evidence=match.group(0),
+                form,
+                lang_name,
+                RelationshipType.COGNATE_OF,
+                confidence=0.7,
+                evidence=match.group(0),
             )
             if rel:
                 relationships.append(rel)
@@ -223,19 +239,26 @@ class RelationshipExtractor:
             form = match.group(2).strip()
 
             # Skip if already matched as borrowing
-            if any(r.target_form == form.lstrip("*") and r.target_language == lang_name
-                   for r in relationships):
+            if any(
+                r.target_form == form.lstrip("*") and r.target_language == lang_name
+                for r in relationships
+            ):
                 continue
 
             # Check if the "from" context suggests borrowing
             context_start = max(0, match.start() - 30)
-            context = etymology_text[context_start:match.start()].lower()
+            context = etymology_text[context_start : match.start()].lower()
             is_borrowing = any(ind in context for ind in BORROWING_INDICATORS)
 
-            rel_type = RelationshipType.BORROWED_FROM if is_borrowing else RelationshipType.DESCENDS_FROM
+            rel_type = (
+                RelationshipType.BORROWED_FROM if is_borrowing else RelationshipType.DESCENDS_FROM
+            )
             rel = self._make_raw_relationship(
-                form, lang_name, rel_type,
-                confidence=0.7, evidence=match.group(0),
+                form,
+                lang_name,
+                rel_type,
+                confidence=0.7,
+                evidence=match.group(0),
             )
             if rel:
                 relationships.append(rel)
@@ -379,24 +402,24 @@ class RelationshipExtractor:
             similarity = levenshtein_ratio(source_form.lower(), cand_form.lower())
 
             if similarity >= min_similarity:
-                cognates.append(ExtractedRelationship(
-                    source_id=lsr_id,
-                    target_id=candidate_id,
-                    relationship_type=RelationshipType.COGNATE_OF,
-                    confidence=round(similarity * 0.8, 2),  # Scale down slightly
-                    date_of_change=None,
-                    change_type=None,
-                    evidence=[
-                        f"Form similarity: {source_form} ~ {cand_form} "
-                        f"({source_lang} ~ {cand_lang}, ratio={similarity:.2f})"
-                    ],
-                ))
+                cognates.append(
+                    ExtractedRelationship(
+                        source_id=lsr_id,
+                        target_id=candidate_id,
+                        relationship_type=RelationshipType.COGNATE_OF,
+                        confidence=round(similarity * 0.8, 2),  # Scale down slightly
+                        date_of_change=None,
+                        change_type=None,
+                        evidence=[
+                            f"Form similarity: {source_form} ~ {cand_form} "
+                            f"({source_lang} ~ {cand_lang}, ratio={similarity:.2f})"
+                        ],
+                    )
+                )
 
         return cognates
 
-    def classify_borrowing(
-        self, relationship: ExtractedRelationship
-    ) -> ExtractedRelationship:
+    def classify_borrowing(self, relationship: ExtractedRelationship) -> ExtractedRelationship:
         """Classify whether a relationship is inheritance or borrowing.
 
         Uses heuristics based on language family relationships.
@@ -446,8 +469,12 @@ class RelationshipExtractor:
         return all_relationships
 
     def _make_raw_relationship(
-        self, form: str, lang_name: str, rel_type: RelationshipType,
-        confidence: float, evidence: str,
+        self,
+        form: str,
+        lang_name: str,
+        rel_type: RelationshipType,
+        confidence: float,
+        evidence: str,
     ) -> RawRelationship | None:
         """Create a RawRelationship if the language is recognized."""
         # Clean the form
@@ -463,7 +490,10 @@ class RelationshipExtractor:
         if not lang_code:
             # Try fuzzy match on language name
             for known_lang, code in LANGUAGE_CODE_MAP.items():
-                if lang_name.lower() in known_lang.lower() or known_lang.lower() in lang_name.lower():
+                if (
+                    lang_name.lower() in known_lang.lower()
+                    or known_lang.lower() in lang_name.lower()
+                ):
                     lang_code = code
                     lang_name = known_lang
                     break
@@ -501,14 +531,16 @@ class RelationshipExtractor:
 
             if target_ids:
                 # Use first match (could be improved with better ranking)
-                resolved.append(ExtractedRelationship(
-                    source_id=source_id,
-                    target_id=target_ids[0],
-                    relationship_type=raw.relationship_type,
-                    confidence=raw.confidence,
-                    date_of_change=None,
-                    change_type=None,
-                    evidence=[raw.evidence],
-                ))
+                resolved.append(
+                    ExtractedRelationship(
+                        source_id=source_id,
+                        target_id=target_ids[0],
+                        relationship_type=raw.relationship_type,
+                        confidence=raw.confidence,
+                        date_of_change=None,
+                        change_type=None,
+                        evidence=[raw.evidence],
+                    )
+                )
 
         return resolved

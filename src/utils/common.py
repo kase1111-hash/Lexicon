@@ -4,7 +4,6 @@ import hashlib
 import re
 from typing import Any, TypeVar
 
-
 T = TypeVar("T")
 
 
@@ -120,7 +119,7 @@ def calculate_overlap_ratio(
 
     Returns a value between 0.0 (no overlap) and 1.0 (complete overlap).
     """
-    if any(x is None for x in [start1, end1, start2, end2]):
+    if start1 is None or end1 is None or start2 is None or end2 is None:
         return 0.5  # Unknown, return neutral
 
     # Ensure proper ordering

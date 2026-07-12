@@ -52,7 +52,7 @@ class HistogramBuckets:
     count: int = 0
 
     def __post_init__(self) -> None:
-        self.counts = {b: 0 for b in self.buckets}
+        self.counts = dict.fromkeys(self.buckets, 0)
         self.counts[float("inf")] = 0
 
     def observe(self, value: float) -> None:
@@ -73,7 +73,7 @@ class MetricsCollector:
         self._counters: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
         self._gauges: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
         self._histograms: dict[str, dict[str, HistogramBuckets]] = defaultdict(dict)
-        self._metadata: dict[str, dict[str, str]] = {}
+        self._metadata: dict[str, dict[str, Any]] = {}
         self._start_time = time.time()
 
         # Register default metrics
@@ -94,7 +94,9 @@ class MetricsCollector:
             ["endpoint", "method"],
         )
         self.register_metric("api_active_requests", "gauge", "Currently active API requests")
-        self.register_metric("lsr_operations_total", "counter", "Total LSR operations", ["operation"])
+        self.register_metric(
+            "lsr_operations_total", "counter", "Total LSR operations", ["operation"]
+        )
         self.register_metric(
             "lsr_operation_duration_seconds",
             "histogram",
@@ -148,13 +150,17 @@ class MetricsCollector:
             key = self._labels_key(labels)
             self._gauges[name][key] = value
 
-    def inc_gauge(self, name: str, value: float = 1.0, labels: dict[str, str] | None = None) -> None:
+    def inc_gauge(
+        self, name: str, value: float = 1.0, labels: dict[str, str] | None = None
+    ) -> None:
         """Increment a gauge."""
         with self._lock:
             key = self._labels_key(labels)
             self._gauges[name][key] += value
 
-    def dec_gauge(self, name: str, value: float = 1.0, labels: dict[str, str] | None = None) -> None:
+    def dec_gauge(
+        self, name: str, value: float = 1.0, labels: dict[str, str] | None = None
+    ) -> None:
         """Decrement a gauge."""
         with self._lock:
             key = self._labels_key(labels)

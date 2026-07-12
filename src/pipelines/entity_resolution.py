@@ -1,7 +1,7 @@
 """Entity resolution and deduplication pipeline."""
 
 import logging
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -11,11 +11,10 @@ from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR
 from src.utils.phonetics import PhoneticUtils
 
-
 logger = logging.getLogger(__name__)
 
 
-class ResolutionAction(str, Enum):
+class ResolutionAction(StrEnum):
     """Actions that can be taken during entity resolution."""
 
     AUTO_MERGE = "auto_merge"  # High confidence match, merge automatically
@@ -211,8 +210,8 @@ class EntityResolver:
             candidate_words = set(candidate_def.split())
             if entry_words and candidate_words:
                 overlap = len(entry_words & candidate_words)
-                total = len(entry_words | candidate_words)
-                features["semantic"] = overlap / total if total > 0 else 0.0
+                union_size = len(entry_words | candidate_words)
+                features["semantic"] = overlap / union_size if union_size > 0 else 0.0
             else:
                 features["semantic"] = 0.0
         else:

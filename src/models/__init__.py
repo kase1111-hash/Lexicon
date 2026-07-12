@@ -23,7 +23,6 @@ from .relationships import (
     RelationshipType,
 )
 
-
 __all__ = [
     # Base classes and mixins
     "BaseEntity",

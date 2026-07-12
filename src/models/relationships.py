@@ -1,13 +1,13 @@
 """Relationship/Edge models for the linguistic graph."""
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
 
-class RelationshipType(str, Enum):
+class RelationshipType(StrEnum):
     """Types of relationships between LSRs."""
 
     DESCENDS_FROM = "DESCENDS_FROM"  # Vertical inheritance within language lineage
@@ -17,7 +17,7 @@ class RelationshipType(str, Enum):
     MERGED_WITH = "MERGED_WITH"  # Convergence of multiple forms
 
 
-class ChangeType(str, Enum):
+class ChangeType(StrEnum):
     """Types of semantic/phonological changes."""
 
     # Semantic changes
@@ -39,7 +39,7 @@ class ChangeType(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
-class ContactType(str, Enum):
+class ContactType(StrEnum):
     """Types of language contact situations."""
 
     CONQUEST = "CONQUEST"

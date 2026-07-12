@@ -17,7 +17,6 @@ from typing import Any
 
 from src.utils.logging import get_logger, get_request_id
 
-
 logger = get_logger(__name__)
 
 
@@ -94,7 +93,7 @@ class SentryIntegration:
                 # Attach stack traces to messages
                 attach_stacktrace=True,
                 # Before send hook for filtering
-                before_send=cls._before_send,
+                before_send=cls._before_send,  # type: ignore[arg-type]
             )
 
             cls._initialized = True
@@ -161,9 +160,7 @@ class SentryIntegration:
             return None
 
     @classmethod
-    def capture_message(
-        cls, message: str, level: str = "info", **context: Any
-    ) -> str | None:
+    def capture_message(cls, message: str, level: str = "info", **context: Any) -> str | None:
         """
         Capture a message and send to Sentry.
 
@@ -185,7 +182,7 @@ class SentryIntegration:
                 for key, value in context.items():
                     scope.set_extra(key, value)
 
-                return sentry_sdk.capture_message(message, level=level)
+                return sentry_sdk.capture_message(message, level=level)  # type: ignore[arg-type]
         except Exception as e:
             logger.error(f"Failed to capture message in Sentry: {e}")
             return None
@@ -218,9 +215,7 @@ class SentryIntegration:
         try:
             import sentry_sdk
 
-            sentry_sdk.add_breadcrumb(
-                message=message, category=category, level=level, data=data
-            )
+            sentry_sdk.add_breadcrumb(message=message, category=category, level=level, data=data)
         except Exception as e:
             logger.debug(f"Failed to add Sentry breadcrumb: {e}")
 
@@ -265,7 +260,7 @@ class ElasticsearchHandler(logging.Handler):
         self.flush_interval = flush_interval
 
         self._buffer: queue.Queue = queue.Queue()
-        self._client = None
+        self._client: Any = None
         self._flush_timer: threading.Timer | None = None
         self._lock = threading.Lock()
         self._shutdown = False
@@ -362,9 +357,9 @@ class ElasticsearchHandler(logging.Handler):
             doc["exception"] = {
                 "type": record.exc_info[0].__name__ if record.exc_info[0] else None,
                 "message": str(record.exc_info[1]) if record.exc_info[1] else None,
-                "stacktrace": self.formatter.formatException(record.exc_info)
-                if self.formatter
-                else None,
+                "stacktrace": (
+                    self.formatter.formatException(record.exc_info) if self.formatter else None
+                ),
             }
 
         return doc
@@ -389,7 +384,7 @@ class ElasticsearchHandler(logging.Handler):
             return
 
         with self._lock:
-            docs = []
+            docs: list[dict[str, Any]] = []
             while not self._buffer.empty() and len(docs) < self.buffer_size * 2:
                 try:
                     docs.append(self._buffer.get_nowait())
@@ -506,9 +501,7 @@ class ErrorNotifier:
         with cls._lock:
             recent_errors = cls._get_recent_errors()
             # Remove old entries
-            cls._recent_errors = [
-                t for t in recent_errors if now - t < cls._rate_limit_window
-            ]
+            cls._recent_errors = [t for t in recent_errors if now - t < cls._rate_limit_window]
 
             if len(cls._recent_errors) >= cls._rate_limit_count:
                 return False

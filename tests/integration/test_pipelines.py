@@ -1,7 +1,6 @@
 """Integration tests for data pipelines."""
 
 import pytest
-from uuid import uuid4
 
 from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR
@@ -183,7 +182,7 @@ class TestEntryToLSRConversion:
                 "A body of water such as a lake or ocean",
                 "To pour water on plants",
             ],
-            part_of_speech="noun",
+            part_of_speech=["noun"],
             date_attested=1200,
             etymology="From Old English wæter",
         )
@@ -196,7 +195,7 @@ class TestEntryToLSRConversion:
         assert lsr.language_name == "English"
         assert lsr.definition_primary == "A clear liquid essential for life"
         assert len(lsr.definitions_alternate) == 2
-        assert lsr.part_of_speech == "noun"
+        assert lsr.part_of_speech == ["noun"]
         assert lsr.date_start == 1200
         assert "wiktionary" in lsr.source_databases
 

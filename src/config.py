@@ -226,7 +226,7 @@ def _mask_dict(d: dict[str, Any], depth: int = 0) -> dict[str, Any]:
     ]
     pattern = re.compile("|".join(sensitive_patterns), re.IGNORECASE)
 
-    result = {}
+    result: dict[str, Any] = {}
     for key, value in d.items():
         if isinstance(value, dict):
             result[key] = _mask_dict(value, depth + 1)

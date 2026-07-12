@@ -1,16 +1,16 @@
 """Lexical State Record (LSR) model - core data unit for the linguistic graph."""
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Self
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from src.utils.phonetics import PhoneticUtils
 
 
-class DateSource(str, Enum):
+class DateSource(StrEnum):
     """Source of date information."""
 
     ATTESTED = "ATTESTED"
@@ -18,7 +18,7 @@ class DateSource(str, Enum):
     RECONSTRUCTED = "RECONSTRUCTED"
 
 
-class Register(str, Enum):
+class Register(StrEnum):
     """Usage register of a word."""
 
     FORMAL = "FORMAL"
@@ -125,7 +125,7 @@ class LSR(BaseModel):
 
     @field_validator("date_end")
     @classmethod
-    def validate_date_range(cls, v: int | None, info) -> int | None:
+    def validate_date_range(cls, v: int | None, info: ValidationInfo) -> int | None:
         """Ensure date_end >= date_start if both are set."""
         if v is not None and info.data.get("date_start") is not None:
             if v < info.data["date_start"]:

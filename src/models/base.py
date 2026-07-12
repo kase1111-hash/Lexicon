@@ -132,9 +132,7 @@ class PaginatedResponse(BaseModel):
     has_prev: bool
 
     @classmethod
-    def create(
-        cls, items: list[Any], total: int, page: int, page_size: int
-    ) -> "PaginatedResponse":
+    def create(cls, items: list[Any], total: int, page: int, page_size: int) -> "PaginatedResponse":
         """Create a paginated response."""
         return cls(
             items=items,

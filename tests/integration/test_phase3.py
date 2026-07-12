@@ -9,24 +9,23 @@ Tests cover:
 """
 
 import csv
-import os
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 
 from src.adapters.base import RawLexicalEntry
 from src.adapters.clld import (
-    CLLDAdapter,
     WOLD_BORROWING_CONFIDENCE,
     WOLD_LANGUAGE_CODES,
     WOLD_SEMANTIC_FIELDS,
+    CLLDAdapter,
     WOLDData,
 )
 from src.models.lsr import LSR
-from src.pipelines.entity_resolution import EntityResolver, convert_entry_to_lsr
+from src.pipelines.entity_resolution import EntityResolver
 from src.repositories.lsr_repository import (
     ES_INDEX_NAME,
     ES_INDEX_SETTINGS,
@@ -34,7 +33,6 @@ from src.repositories.lsr_repository import (
     LSRRepository,
 )
 from src.utils.cache import CacheManager, make_cache_key
-
 
 # =============================================================================
 # Fixtures
@@ -48,22 +46,44 @@ def wold_csv_dir():
         # Create languages.csv
         lang_path = Path(tmpdir) / "languages.csv"
         with open(lang_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=[
-                "ID", "Name", "ISO639P3code", "Glottocode", "Family",
-            ])
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "ID",
+                    "Name",
+                    "ISO639P3code",
+                    "Glottocode",
+                    "Family",
+                ],
+            )
             writer.writeheader()
-            writer.writerow({
-                "ID": "eng", "Name": "English", "ISO639P3code": "eng",
-                "Glottocode": "stan1293", "Family": "Indo-European",
-            })
-            writer.writerow({
-                "ID": "fra", "Name": "French", "ISO639P3code": "fra",
-                "Glottocode": "stan1290", "Family": "Indo-European",
-            })
-            writer.writerow({
-                "ID": "swh", "Name": "Swahili", "ISO639P3code": "swh",
-                "Glottocode": "swah1253", "Family": "Atlantic-Congo",
-            })
+            writer.writerow(
+                {
+                    "ID": "eng",
+                    "Name": "English",
+                    "ISO639P3code": "eng",
+                    "Glottocode": "stan1293",
+                    "Family": "Indo-European",
+                }
+            )
+            writer.writerow(
+                {
+                    "ID": "fra",
+                    "Name": "French",
+                    "ISO639P3code": "fra",
+                    "Glottocode": "stan1290",
+                    "Family": "Indo-European",
+                }
+            )
+            writer.writerow(
+                {
+                    "ID": "swh",
+                    "Name": "Swahili",
+                    "ISO639P3code": "swh",
+                    "Glottocode": "swah1253",
+                    "Family": "Atlantic-Congo",
+                }
+            )
 
         # Create parameters.csv (meanings)
         params_path = Path(tmpdir) / "parameters.csv"
@@ -77,36 +97,68 @@ def wold_csv_dir():
         # Create forms.csv
         forms_path = Path(tmpdir) / "forms.csv"
         with open(forms_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=[
-                "ID", "Language_ID", "Parameter_ID", "Form",
-                "Borrowed_score", "source_language",
-            ])
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "ID",
+                    "Language_ID",
+                    "Parameter_ID",
+                    "Form",
+                    "Borrowed_score",
+                    "source_language",
+                ],
+            )
             writer.writeheader()
-            writer.writerow({
-                "ID": "eng-sky-1", "Language_ID": "eng",
-                "Parameter_ID": "1-1", "Form": "sky",
-                "Borrowed_score": "1.0", "source_language": "Old Norse",
-            })
-            writer.writerow({
-                "ID": "eng-eat-1", "Language_ID": "eng",
-                "Parameter_ID": "5-1", "Form": "eat",
-                "Borrowed_score": "5.0", "source_language": "",
-            })
-            writer.writerow({
-                "ID": "fra-manger-1", "Language_ID": "fra",
-                "Parameter_ID": "5-1", "Form": "manger",
-                "Borrowed_score": "4.5", "source_language": "",
-            })
-            writer.writerow({
-                "ID": "swh-kompyuta-1", "Language_ID": "swh",
-                "Parameter_ID": "23-1", "Form": "kompyuta",
-                "Borrowed_score": "1.0", "source_language": "English",
-            })
-            writer.writerow({
-                "ID": "eng-empty-1", "Language_ID": "eng",
-                "Parameter_ID": "23-1", "Form": "",
-                "Borrowed_score": "", "source_language": "",
-            })
+            writer.writerow(
+                {
+                    "ID": "eng-sky-1",
+                    "Language_ID": "eng",
+                    "Parameter_ID": "1-1",
+                    "Form": "sky",
+                    "Borrowed_score": "1.0",
+                    "source_language": "Old Norse",
+                }
+            )
+            writer.writerow(
+                {
+                    "ID": "eng-eat-1",
+                    "Language_ID": "eng",
+                    "Parameter_ID": "5-1",
+                    "Form": "eat",
+                    "Borrowed_score": "5.0",
+                    "source_language": "",
+                }
+            )
+            writer.writerow(
+                {
+                    "ID": "fra-manger-1",
+                    "Language_ID": "fra",
+                    "Parameter_ID": "5-1",
+                    "Form": "manger",
+                    "Borrowed_score": "4.5",
+                    "source_language": "",
+                }
+            )
+            writer.writerow(
+                {
+                    "ID": "swh-kompyuta-1",
+                    "Language_ID": "swh",
+                    "Parameter_ID": "23-1",
+                    "Form": "kompyuta",
+                    "Borrowed_score": "1.0",
+                    "source_language": "English",
+                }
+            )
+            writer.writerow(
+                {
+                    "ID": "eng-empty-1",
+                    "Language_ID": "eng",
+                    "Parameter_ID": "23-1",
+                    "Form": "",
+                    "Borrowed_score": "",
+                    "source_language": "",
+                }
+            )
 
         yield tmpdir
 
@@ -122,13 +174,15 @@ def sample_lsrs():
         ("agua", "spa", "Spanish"),
         ("acqua", "ita", "Italian"),
     ]:
-        lsrs.append(LSR(
-            form_orthographic=form,
-            language_code=lang_code,
-            language_name=lang_name,
-            definition_primary=f"water ({lang_name})",
-            source_databases=["test"],
-        ))
+        lsrs.append(
+            LSR(
+                form_orthographic=form,
+                language_code=lang_code,
+                language_name=lang_name,
+                definition_primary=f"water ({lang_name})",
+                source_databases=["test"],
+            )
+        )
     return lsrs
 
 
@@ -361,7 +415,9 @@ class TestLSRRepositoryBatch:
         """_has_elasticsearch returns False when not connected."""
         db = MagicMock()
         db.elasticsearch = property(lambda self: (_ for _ in ()).throw(RuntimeError()))
-        type(db).elasticsearch = property(lambda self: (_ for _ in ()).throw(RuntimeError("not connected")))
+        type(db).elasticsearch = property(
+            lambda self: (_ for _ in ()).throw(RuntimeError("not connected"))
+        )
         repo = LSRRepository(db)
         assert repo._has_elasticsearch() is False
 

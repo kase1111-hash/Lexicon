@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from datetime import datetime
+from types import TracebackType
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -113,8 +114,7 @@ class SourceAdapter(ABC):
         total = self.get_total_count()
 
         while offset < total:
-            for entry in self.fetch_batch(offset, batch_size):
-                yield entry
+            yield from self.fetch_batch(offset, batch_size)
             offset += batch_size
 
     def fetch_incremental(self, since: datetime) -> Iterator[RawLexicalEntry]:
@@ -161,6 +161,11 @@ class SourceAdapter(ABC):
         self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Context manager exit."""
         self.disconnect()

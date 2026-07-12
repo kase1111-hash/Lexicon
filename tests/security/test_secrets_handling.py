@@ -4,16 +4,17 @@ These tests ensure that sensitive data like passwords, API keys,
 and tokens are properly protected and not exposed.
 """
 
-import pytest
-import os
 import json
+import os
 from unittest.mock import patch
 
+import pytest
+
 from src.config import (
-    Settings,
-    DatabaseConfig,
     APIConfig,
+    DatabaseConfig,
     ErrorTrackingConfig,
+    Settings,
     get_settings,
     reload_settings,
 )
@@ -76,10 +77,9 @@ class TestSecretsMasking:
             sentry_dsn="https://abc123@sentry.io/12345",
         )
 
-        # DSN contains sensitive token, should be handled carefully
+        # DSN contains a sensitive token; it must not appear in repr
         repr_str = repr(config)
-        # The actual token (abc123) should not be fully visible
-        # Implementation may vary
+        assert "abc123" not in repr_str
 
 
 class TestSecretsNotLogged:
@@ -127,7 +127,11 @@ class TestEnvironmentVariableSecurity:
         # Error messages should describe what's missing, not show values
         for error in errors:
             # Should not contain actual secret values
-            assert "password" not in error.lower() or "required" in error.lower() or "missing" in error.lower()
+            assert (
+                "password" not in error.lower()
+                or "required" in error.lower()
+                or "missing" in error.lower()
+            )
 
 
 class TestSecretStrUsage:
@@ -146,7 +150,7 @@ class TestSecretStrUsage:
             # If it's a SecretStr, str() should show masked value
             str_val = str(password_field)
             # Should either be masked or require explicit access
-            assert "test_password" not in str_val or hasattr(password_field, 'get_secret_value')
+            assert "test_password" not in str_val or hasattr(password_field, "get_secret_value")
 
 
 class TestConfigurationFileSecurity:
@@ -157,28 +161,29 @@ class TestConfigurationFileSecurity:
         env_example_path = "/home/user/Lexicon/.env.example"
 
         try:
-            with open(env_example_path, 'r') as f:
+            with open(env_example_path) as f:
                 content = f.read()
 
             # Should not contain what looks like real secrets
-            lines = content.split('\n')
+            lines = content.split("\n")
             for line in lines:
-                if '=' in line and not line.startswith('#'):
-                    key, _, value = line.partition('=')
+                if "=" in line and not line.startswith("#"):
+                    key, _, value = line.partition("=")
                     value = value.strip().strip('"').strip("'")
 
                     # Values should be placeholders, not real secrets
-                    if 'password' in key.lower() or 'secret' in key.lower() or 'key' in key.lower():
+                    if "password" in key.lower() or "secret" in key.lower() or "key" in key.lower():
                         # Should be empty, placeholder, example, or known default
                         # "minioadmin" is MinIO's default admin credential (not a real secret)
-                        known_defaults = ['minioadmin', 'admin', 'test', 'dev']
-                        assert value in ['', 'your-secret-here', 'change-me', 'xxx'] or \
-                               'example' in value.lower() or \
-                               'your' in value.lower() or \
-                               'change' in value.lower() or \
-                               value.lower() in known_defaults or \
-                               len(value) < 5, \
-                               f"Potential secret in .env.example: {key}={value}"
+                        known_defaults = ["minioadmin", "admin", "test", "dev"]
+                        assert (
+                            value in ["", "your-secret-here", "change-me", "xxx"]
+                            or "example" in value.lower()
+                            or "your" in value.lower()
+                            or "change" in value.lower()
+                            or value.lower() in known_defaults
+                            or len(value) < 5
+                        ), f"Potential secret in .env.example: {key}={value}"
 
         except FileNotFoundError:
             pytest.skip(".env.example not found")
@@ -187,7 +192,7 @@ class TestConfigurationFileSecurity:
         """Test that config.py doesn't have hardcoded secrets."""
         config_path = "/home/user/Lexicon/src/config.py"
 
-        with open(config_path, 'r') as f:
+        with open(config_path) as f:
             content = f.read()
 
         # Should not contain hardcoded secret-looking values
@@ -205,15 +210,16 @@ class TestConfigurationFileSecurity:
         for pattern in suspicious_patterns:
             if pattern in content.lower():
                 # Find the actual line
-                for line in content.split('\n'):
+                for line in content.split("\n"):
                     if pattern in line.lower():
                         # Should be a default="" or example, not a real value
-                        assert 'default=' in line.lower() or \
-                               '""' in line or \
-                               "''" in line or \
-                               'None' in line or \
-                               'Field(' in line, \
-                               f"Potential hardcoded secret: {line.strip()}"
+                        assert (
+                            "default=" in line.lower()
+                            or '""' in line
+                            or "''" in line
+                            or "None" in line
+                            or "Field(" in line
+                        ), f"Potential hardcoded secret: {line.strip()}"
 
 
 class TestAPISecurityHeaders:
@@ -221,16 +227,13 @@ class TestAPISecurityHeaders:
 
     def test_cors_not_wildcard_in_production(self):
         """Test that CORS isn't set to wildcard for production."""
-        # In production, CORS should not be *
-        config = APIConfig(cors_origins="*")
+        # Wildcard CORS is accepted as a development setting
+        APIConfig(cors_origins="*")
 
-        # This is a development setting
-        # Production validation should warn about this
+        # Production validation must at least run and report a list of errors
         settings = Settings()
         errors = settings.validate_required_for_production()
-
-        # Should either warn or have non-wildcard setting for production
-        # This test documents the expectation
+        assert isinstance(errors, list)
 
 
 class TestTokenSecurity:
@@ -242,7 +245,7 @@ class TestTokenSecurity:
         settings = Settings()
 
         # Verify jwt_secret field exists
-        assert hasattr(settings.api, 'jwt_secret')
+        assert hasattr(settings.api, "jwt_secret")
 
         # Production validation should catch issues
         errors = settings.validate_required_for_production()
@@ -259,7 +262,7 @@ class TestTokenSecurity:
 
         # Should not crash, DSN stored as SecretStr
         # The raw value is accessible via get_secret_value()
-        if hasattr(config.sentry_dsn, 'get_secret_value'):
+        if hasattr(config.sentry_dsn, "get_secret_value"):
             assert config.sentry_dsn.get_secret_value() == "not-a-valid-dsn"
         else:
             # If not a SecretStr, check direct value

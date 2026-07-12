@@ -1,6 +1,5 @@
 """GraphQL schema definition using Strawberry."""
 
-
 import strawberry
 
 

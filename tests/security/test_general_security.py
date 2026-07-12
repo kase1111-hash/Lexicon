@@ -4,11 +4,10 @@ These tests cover general security practices and patterns
 that should be followed throughout the codebase.
 """
 
-import pytest
-import os
-import ast
 import re
 from pathlib import Path
+
+import pytest
 
 
 class TestNoHardcodedCredentials:
@@ -35,9 +34,11 @@ class TestNoHardcodedCredentials:
                 matches = re.findall(pattern, content, re.IGNORECASE)
                 for match in matches:
                     # Allow if it's in a comment, docstring, or test/example
-                    if not any(x in match.lower() for x in ['example', 'test', 'placeholder', 'your-']):
+                    if not any(
+                        x in match.lower() for x in ["example", "test", "placeholder", "your-"]
+                    ):
                         # Check if it's a default="" pattern (acceptable)
-                        if 'default=' not in match.lower():
+                        if "default=" not in match.lower():
                             pytest.fail(f"Potential hardcoded password in {file_path}: {match}")
 
     def test_no_hardcoded_api_keys(self, source_files):
@@ -54,7 +55,7 @@ class TestNoHardcodedCredentials:
             for pattern in api_key_patterns:
                 matches = re.findall(pattern, content, re.IGNORECASE)
                 for match in matches:
-                    if 'default=' not in match.lower() and 'example' not in match.lower():
+                    if "default=" not in match.lower() and "example" not in match.lower():
                         pytest.fail(f"Potential hardcoded API key in {file_path}: {match}")
 
     def test_no_private_keys(self, source_files):
@@ -84,7 +85,7 @@ class TestSecureDefaults:
         settings = Settings()
 
         # Rate limiting should be configurable
-        assert hasattr(settings.api, 'rate_limit_enabled')
+        assert hasattr(settings.api, "rate_limit_enabled")
         # Default is off for development, but can be enabled
         assert isinstance(settings.api.rate_limit_enabled, bool)
 
@@ -116,9 +117,10 @@ class TestExceptionSecurity:
         error_str = str(error)
         error_dict = error.to_dict()
 
-        # The full sensitive value might be in details for debugging
-        # But it should be truncated or masked in production
-        # This test documents the behavior
+        # The full sensitive value might be in details for debugging,
+        # but the message itself should not embed it
+        assert "Invalid input" in error_str
+        assert sensitive_value not in error_dict["message"]
 
     def test_database_error_doesnt_leak_credentials(self):
         """Test that database errors don't expose credentials."""
@@ -138,7 +140,7 @@ class TestLoggingSecurity:
 
     def test_request_id_format_safe(self):
         """Test that request IDs are safely formatted."""
-        from src.utils.logging import set_request_id, get_request_id
+        from src.utils.logging import set_request_id
 
         # Set a request ID
         req_id = set_request_id()
@@ -237,14 +239,6 @@ class TestGitIgnoreSecurity:
         if gitignore_path.exists():
             content = gitignore_path.read_text()
 
-            # Should exclude common secret patterns
-            patterns_to_check = [
-                ".env",
-                "*.pem",
-                "*.key",
-                "credentials",
-            ]
-
             # At minimum, .env should be excluded
             assert ".env" in content
 
@@ -257,11 +251,11 @@ class TestDependencySecurity:
         src_dir = Path("/home/user/Lexicon/src")
 
         vulnerable_patterns = [
-            (r'pickle\.loads?\(', "Pickle deserialization can be dangerous"),
-            (r'eval\s*\(', "eval() can execute arbitrary code"),
-            (r'exec\s*\(', "exec() can execute arbitrary code"),
-            (r'__import__\s*\(', "Dynamic imports can be dangerous"),
-            (r'subprocess\..*shell\s*=\s*True', "Shell=True can be dangerous"),
+            (r"pickle\.loads?\(", "Pickle deserialization can be dangerous"),
+            (r"eval\s*\(", "eval() can execute arbitrary code"),
+            (r"exec\s*\(", "exec() can execute arbitrary code"),
+            (r"__import__\s*\(", "Dynamic imports can be dangerous"),
+            (r"subprocess\..*shell\s*=\s*True", "Shell=True can be dangerous"),
         ]
 
         for py_file in src_dir.rglob("*.py"):
@@ -271,8 +265,6 @@ class TestDependencySecurity:
                 matches = re.findall(pattern, content)
                 if matches:
                     # Check if it's in a comment
-                    for line_no, line in enumerate(content.split('\n'), 1):
-                        if re.search(pattern, line) and not line.strip().startswith('#'):
-                            pytest.fail(
-                                f"{message} found in {py_file}:{line_no}: {line.strip()}"
-                            )
+                    for line_no, line in enumerate(content.split("\n"), 1):
+                        if re.search(pattern, line) and not line.strip().startswith("#"):
+                            pytest.fail(f"{message} found in {py_file}:{line_no}: {line.strip()}")

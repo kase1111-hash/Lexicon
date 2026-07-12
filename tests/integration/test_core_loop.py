@@ -8,12 +8,13 @@ These tests verify that the complete pipeline works end-to-end:
 5. Ingestion script logic (without network)
 """
 
-import pytest
 from uuid import UUID, uuid4
+
+import pytest
 
 from src.adapters.base import RawLexicalEntry
 from src.analysis.contact_detection import ContactDetector, ContactEvent
-from src.analysis.dating import TextDating, DateAnalysis, AnachronismAnalysis
+from src.analysis.dating import AnachronismAnalysis, DateAnalysis, TextDating
 from src.analysis.semantic_drift import SemanticDriftAnalyzer, SemanticTrajectory
 from src.models.lsr import LSR
 from src.pipelines.entity_resolution import (
@@ -156,10 +157,20 @@ class TestIngestResolveLoop:
                 language_code="eng",
                 definitions=[f"definition of {form}"],
             )
-            for i, form in enumerate([
-                "water", "fire", "earth", "air", "stone",
-                "tree", "sun", "moon", "star", "rain",
-            ])
+            for i, form in enumerate(
+                [
+                    "water",
+                    "fire",
+                    "earth",
+                    "air",
+                    "stone",
+                    "tree",
+                    "sun",
+                    "moon",
+                    "star",
+                    "rain",
+                ]
+            )
         ]
 
         created = 0
@@ -261,20 +272,30 @@ class TestContactDetectionIntegration:
         """Build borrowing data matching the format from _build_borrowing_data."""
         # Simulate Norman French -> English borrowings (post-1066)
         norman_words = [
-            "justice", "parliament", "royal", "sovereign", "castle",
-            "noble", "court", "judge", "attorney", "verdict",
+            "justice",
+            "parliament",
+            "royal",
+            "sovereign",
+            "castle",
+            "noble",
+            "court",
+            "judge",
+            "attorney",
+            "verdict",
         ]
         borrowings = []
         for word in norman_words:
-            borrowings.append({
-                "form": word,
-                "source_lang": "fra",
-                "target_lang": "eng",
-                "date": 1150,
-                "date_start": 1066,
-                "date_end": 1300,
-                "definition": f"{word} (borrowed from French)",
-            })
+            borrowings.append(
+                {
+                    "form": word,
+                    "source_lang": "fra",
+                    "target_lang": "eng",
+                    "date": 1150,
+                    "date_start": 1066,
+                    "date_end": 1300,
+                    "definition": f"{word} (borrowed from French)",
+                }
+            )
         return borrowings
 
     def test_detect_norman_contact(self, borrowing_data):
@@ -600,13 +621,7 @@ class TestIngestionScriptLogic:
 
         word_file = tmp_path / "words.txt"
         word_file.write_text(
-            "# Header comment\n"
-            "water\n"
-            "fire\n"
-            "\n"
-            "# Another comment\n"
-            "earth\n"
-            "  \n"
+            "# Header comment\n" "water\n" "fire\n" "\n" "# Another comment\n" "earth\n" "  \n"
         )
 
         words = load_word_list(str(word_file))
@@ -629,12 +644,12 @@ class TestIngestionScriptLogic:
         summary = stats.summary()
         assert "INGESTION SUMMARY" in summary
         assert "100" in summary  # words attempted
-        assert "85" in summary   # words fetched
+        assert "85" in summary  # words fetched
         assert "error 1" in summary
 
     def test_process_entry_create_new(self):
         """_process_entry handles CREATE_NEW action."""
-        from scripts.ingest import _process_entry, IngestionStats
+        from scripts.ingest import IngestionStats, _process_entry
 
         resolver = EntityResolver(
             auto_merge_threshold=0.95,
@@ -661,7 +676,7 @@ class TestIngestionScriptLogic:
 
     def test_process_entry_dry_run(self):
         """_process_entry in dry-run mode doesn't persist."""
-        from scripts.ingest import _process_entry, IngestionStats
+        from scripts.ingest import IngestionStats, _process_entry
 
         resolver = EntityResolver(
             auto_merge_threshold=0.95,

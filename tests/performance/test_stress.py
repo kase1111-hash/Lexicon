@@ -4,10 +4,10 @@ These tests verify the system remains stable and performs
 acceptably under heavy load and with large datasets.
 """
 
-import pytest
-import time
 import gc
-from typing import List
+import time
+
+import pytest
 
 from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR, Attestation
@@ -17,13 +17,14 @@ from src.pipelines.entity_resolution import EntityResolver, convert_entry_to_lsr
 def get_memory_usage_mb() -> float:
     """Get current process memory usage in MB."""
     import os
+
     try:
         # Try to read from /proc on Linux
         with open(f"/proc/{os.getpid()}/status") as f:
             for line in f:
                 if line.startswith("VmRSS:"):
                     return int(line.split()[1]) / 1024  # Convert KB to MB
-    except (FileNotFoundError, IOError):
+    except (OSError, FileNotFoundError):
         pass
 
     # Fallback: estimate from object count
@@ -156,7 +157,7 @@ class TestMemoryUsage:
         initial_objects = len(gc.get_objects())
 
         # Create and discard many LSRs
-        for batch in range(10):
+        for _ in range(10):
             lsrs = []
             for i in range(1000):
                 lsr = LSR(
@@ -171,7 +172,9 @@ class TestMemoryUsage:
         final_objects = len(gc.get_objects())
         object_growth = final_objects - initial_objects
 
-        print(f"\nObject count: initial={initial_objects}, final={final_objects}, growth={object_growth}")
+        print(
+            f"\nObject count: initial={initial_objects}, final={final_objects}, growth={object_growth}"
+        )
 
         # Allow some growth for caches, but not excessive
         assert object_growth < 10000, f"Potential memory leak: {object_growth} object growth"
@@ -308,7 +311,7 @@ class TestLargeAttestationHandling:
         start_time = time.perf_counter()
 
         for _ in range(50):
-            lsr = LSR(
+            LSR(
                 form_orthographic="test",
                 language_code="eng",
                 attestations=[
@@ -329,6 +332,7 @@ class TestLargeAttestationHandling:
 
     def test_merge_with_many_attestations(self):
         """Test merging LSRs with many attestations."""
+
         def create_lsr_with_attestations(count: int, prefix: str) -> LSR:
             return LSR(
                 form_orthographic="test",
@@ -420,7 +424,7 @@ class TestScalabilityLimits:
             iterations = 100
 
             start_time = time.perf_counter()
-            for i in range(iterations):
+            for _ in range(iterations):
                 LSR(
                     form_orthographic="test",
                     language_code="eng",
