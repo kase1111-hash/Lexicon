@@ -1,10 +1,9 @@
 """Unit tests for data models."""
 
-import pytest
 from uuid import UUID
 
-from src.models.lsr import LSR, Attestation, DateSource, Register
-from src.models.language import Language, ContactEvent
+from src.models.language import Language
+from src.models.lsr import LSR, Attestation
 from src.models.relationships import Edge, RelationshipType
 
 
@@ -71,6 +70,7 @@ class TestEdge:
     def test_edge_creation(self):
         """Test basic edge creation."""
         from uuid import uuid4
+
         src = uuid4()
         tgt = uuid4()
         edge = Edge(

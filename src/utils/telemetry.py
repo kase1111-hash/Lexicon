@@ -23,6 +23,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from types import TracebackType
 from typing import Any, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -123,7 +124,12 @@ class SpanContextManager:
         self._token = _current_span.set(self.span)
         return self.span
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         if exc_type is not None:
             self.span.set_status("ERROR", str(exc_val))
             self.span.add_event(

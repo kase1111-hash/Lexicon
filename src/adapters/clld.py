@@ -14,9 +14,7 @@ https://wold.clld.org/. The key tables are:
 """
 
 import csv
-import io
 import logging
-import re
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
@@ -70,7 +68,6 @@ WOLD_LANGUAGE_CODES: dict[str, str] = {
     "Persian": "fas",
     "Hausa": "hau",
     "Yoruba": "yor",
-    "Swahili": "swh",
     "Malagasy": "mlg",
     "Tagalog": "tgl",
     "Cebuano": "ceb",
@@ -311,11 +308,10 @@ class CLLDAdapter(SourceAdapter):
                     f"{filepath.name}: {e}. Retrying in {wait}s..."
                 )
                 import time
+
                 time.sleep(wait)
 
-        raise RuntimeError(
-            f"Failed to download {url} after {max_retries} retries: {last_error}"
-        )
+        raise RuntimeError(f"Failed to download {url} after {max_retries} retries: {last_error}")
 
     def _load_data(self) -> None:
         """Load and parse all WOLD CSV files into memory."""
@@ -452,11 +448,13 @@ class CLLDAdapter(SourceAdapter):
         # Build related_forms for borrowing relationships
         related_forms: list[dict[str, Any]] = []
         if is_borrowed and donor_language:
-            related_forms.append({
-                "type": "borrowed_from",
-                "language": donor_language,
-                "confidence": borrowing_confidence,
-            })
+            related_forms.append(
+                {
+                    "type": "borrowed_from",
+                    "language": donor_language,
+                    "confidence": borrowing_confidence,
+                }
+            )
 
         # Build etymology text from borrowing data
         etymology = None

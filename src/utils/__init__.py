@@ -34,7 +34,8 @@ from .logging import (
     set_request_id,
     setup_logging,
 )
-from .metrics import MetricsCollector, Timer as MetricsTimer, metrics, timed
+from .metrics import MetricsCollector, metrics, timed
+from .metrics import Timer as MetricsTimer
 from .phonetics import PhoneticUtils
 from .telemetry import Span, SpanContext, Tracer, get_trace_context, traced, tracer
 from .validation import (
@@ -55,7 +56,6 @@ from .validation import (
     sanitize_string,
     sanitize_year,
 )
-
 
 __all__ = [
     # Database

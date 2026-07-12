@@ -93,8 +93,12 @@ class TestLoggingConfig:
         # LoggingConfig uses env_prefix="" so it reads LOG_LEVEL etc. from
         # environment. Clear those to test actual defaults.
         logging_env_keys = {
-            "LOG_LEVEL", "LOG_FORMAT", "LOG_FILE",
-            "API_LOG_LEVEL", "PIPELINE_LOG_LEVEL", "DB_LOG_LEVEL",
+            "LOG_LEVEL",
+            "LOG_FORMAT",
+            "LOG_FILE",
+            "API_LOG_LEVEL",
+            "PIPELINE_LOG_LEVEL",
+            "DB_LOG_LEVEL",
             "SLOW_REQUEST_THRESHOLD_MS",
         }
         clean_env = {k: v for k, v in os.environ.items() if k not in logging_env_keys}
@@ -210,11 +214,14 @@ class TestEnvironmentLoading:
 
     def test_env_override(self):
         """Test that environment variables override defaults."""
-        with patch.dict(os.environ, {"LOG_LEVEL": "DEBUG"}):
+        try:
+            with patch.dict(os.environ, {"LOG_LEVEL": "DEBUG"}):
+                reload_settings()
+                settings = get_settings()
+                assert settings.logging.log_level == "DEBUG"
+        finally:
+            # Re-read the restored environment so other tests see defaults
             reload_settings()
-            settings = get_settings()
-            # Note: This may not work in all test scenarios due to caching
-            # In real tests, you'd need to reload settings properly
 
     def test_missing_env_uses_defaults(self):
         """Test that missing env vars use defaults."""

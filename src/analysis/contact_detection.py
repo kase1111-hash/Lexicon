@@ -10,6 +10,7 @@ Uses:
 
 import logging
 import math
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -50,24 +51,66 @@ class BorrowingPattern:
 # Semantic domain indicators for contact type classification
 CONTACT_TYPE_INDICATORS = {
     "trade": [
-        "commerce", "money", "goods", "merchant", "market", "price",
-        "trade", "exchange", "cargo", "ship", "port",
+        "commerce",
+        "money",
+        "goods",
+        "merchant",
+        "market",
+        "price",
+        "trade",
+        "exchange",
+        "cargo",
+        "ship",
+        "port",
     ],
     "conquest": [
-        "military", "war", "weapon", "soldier", "army", "battle",
-        "king", "ruler", "law", "court", "tax", "tribute",
+        "military",
+        "war",
+        "weapon",
+        "soldier",
+        "army",
+        "battle",
+        "king",
+        "ruler",
+        "law",
+        "court",
+        "tax",
+        "tribute",
     ],
     "religious": [
-        "religion", "god", "temple", "priest", "sacred", "ritual",
-        "prayer", "worship", "heaven", "soul", "sin",
+        "religion",
+        "god",
+        "temple",
+        "priest",
+        "sacred",
+        "ritual",
+        "prayer",
+        "worship",
+        "heaven",
+        "soul",
+        "sin",
     ],
     "cultural": [
-        "art", "music", "literature", "education", "philosophy",
-        "science", "fashion", "food", "architecture",
+        "art",
+        "music",
+        "literature",
+        "education",
+        "philosophy",
+        "science",
+        "fashion",
+        "food",
+        "architecture",
     ],
     "technological": [
-        "technology", "tool", "machine", "invention", "science",
-        "medicine", "agriculture", "craft", "manufacture",
+        "technology",
+        "tool",
+        "machine",
+        "invention",
+        "science",
+        "medicine",
+        "agriculture",
+        "craft",
+        "manufacture",
     ],
 }
 
@@ -217,7 +260,8 @@ class ContactDetector:
         # Filter by date range
         if date_start is not None or date_end is not None:
             borrowings = [
-                b for b in borrowings
+                b
+                for b in borrowings
                 if self._in_date_range(
                     b.get("date"),
                     date_start,
@@ -242,7 +286,7 @@ class ContactDetector:
         # Find peak period
         peak_period = None
         if by_period:
-            peak_century = max(by_period, key=by_period.get)
+            peak_century = max(by_period, key=lambda k: by_period[k])
             peak_period = self._century_label_to_range(peak_century)
 
         # Detect individual contact events
@@ -367,8 +411,7 @@ class ContactDetector:
         borrowings = self._language_pairs.get((donor, recipient), [])
         if date_start is not None or date_end is not None:
             borrowings = [
-                b for b in borrowings
-                if self._in_date_range(b.get("date"), date_start, date_end)
+                b for b in borrowings if self._in_date_range(b.get("date"), date_start, date_end)
             ]
         return borrowings
 
@@ -383,9 +426,7 @@ class ContactDetector:
             return True  # Include undated borrowings
         if date_start is not None and date < date_start:
             return False
-        if date_end is not None and date > date_end:
-            return False
-        return True
+        return not (date_end is not None and date > date_end)
 
     def _cluster_by_language_and_period(
         self,
@@ -515,7 +556,7 @@ class ContactDetector:
             return None
 
         # Return highest-scoring type
-        best_type = max(scores, key=scores.get)
+        best_type = max(scores, key=lambda k: scores[k])
         return best_type if scores[best_type] > 0 else None
 
     def _calculate_event_confidence(
@@ -542,7 +583,7 @@ class ContactDetector:
         domain_score = 1.0 - (entropy / max_entropy) if max_entropy > 0 else 0.5
 
         # Date clustering: standard deviation based
-        dates = [b.get("date") for b in borrowings if b.get("date") is not None]
+        dates = [b["date"] for b in borrowings if b.get("date") is not None]
         if len(dates) >= 2:
             mean_date = sum(dates) / len(dates)
             variance = sum((d - mean_date) ** 2 for d in dates) / len(dates)
@@ -553,7 +594,7 @@ class ContactDetector:
             date_score = 0.5
 
         # Weighted average
-        return (count_score * 0.4 + domain_score * 0.3 + date_score * 0.3)
+        return count_score * 0.4 + domain_score * 0.3 + date_score * 0.3
 
     def _identify_adaptations(self, borrowings: list[dict]) -> list[str]:
         """Identify common phonological adaptations in borrowings."""
@@ -566,7 +607,7 @@ class ContactDetector:
 
         # Count common suffix changes
         suffix_changes: dict[str, int] = defaultdict(int)
-        for src, tgt in zip(source_forms, target_forms):
+        for src, tgt in zip(source_forms, target_forms, strict=False):
             if src and tgt and len(src) > 2 and len(tgt) > 2:
                 if src[-2:] != tgt[-2:]:
                     change = f"-{src[-2:]} > -{tgt[-2:]}"
@@ -604,7 +645,7 @@ class ContactDetector:
         if len(parts) < 3:
             return (0, 100)
 
-        century = int(parts[0].rstrip("thstndrd"))
+        century = int(re.sub(r"(st|nd|rd|th)$", "", parts[0]))
         is_bce = "BCE" in label
 
         if is_bce:

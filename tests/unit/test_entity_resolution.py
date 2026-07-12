@@ -1,7 +1,8 @@
 """Unit tests for entity resolution pipeline."""
 
-import pytest
 from uuid import uuid4
+
+import pytest
 
 from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR

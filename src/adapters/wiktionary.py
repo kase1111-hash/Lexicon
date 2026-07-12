@@ -1,12 +1,10 @@
 """Wiktionary adapter for ingesting etymological data from Wiktionary API."""
 
-import asyncio
 import logging
 import re
 import time
 from collections.abc import Iterator
 from datetime import datetime
-from typing import Any
 
 import httpx
 
@@ -191,6 +189,9 @@ class WiktionaryAdapter(SourceAdapter):
             "formatversion": "2",
         }
 
+        if not self._client:
+            raise RuntimeError("Not connected. Call connect() first.")
+
         last_error = None
         for attempt in range(max_retries):
             try:
@@ -207,7 +208,9 @@ class WiktionaryAdapter(SourceAdapter):
                 )
                 time.sleep(wait)
         else:
-            raise last_error or RuntimeError(f"Failed to fetch '{word}' after {max_retries} retries")
+            raise last_error or RuntimeError(
+                f"Failed to fetch '{word}' after {max_retries} retries"
+            )
 
         # Extract the wikitext content
         pages = data.get("query", {}).get("pages", [])
@@ -263,7 +266,9 @@ class WiktionaryAdapter(SourceAdapter):
             language_code = LANGUAGE_CODE_MAP.get(language_name, language_name[:3].lower())
 
             # Parse the language section
-            entry = self._parse_language_section(word, language_name, language_code, section_content)
+            entry = self._parse_language_section(
+                word, language_name, language_code, section_content
+            )
             if entry:
                 entries.append(entry)
 
@@ -294,7 +299,9 @@ class WiktionaryAdapter(SourceAdapter):
 
         # Extract etymology - handle multiple sections (Etymology 1, 2, etc.)
         etymology_raw = self._extract_etymology_raw(content)
-        etymology_templates = self._extract_etymology_templates(etymology_raw) if etymology_raw else []
+        etymology_templates = (
+            self._extract_etymology_templates(etymology_raw) if etymology_raw else []
+        )
         etymology = self._clean_wikitext(etymology_raw) if etymology_raw else None
 
         # Extract definitions
@@ -309,12 +316,14 @@ class WiktionaryAdapter(SourceAdapter):
         # Build related_forms from etymology templates
         related_forms = []
         for tmpl in etymology_templates:
-            related_forms.append({
-                "type": tmpl["name"],
-                "form": tmpl.get("term", ""),
-                "language_code": tmpl.get("lang", ""),
-                "raw_template": tmpl.get("raw", ""),
-            })
+            related_forms.append(
+                {
+                    "type": tmpl["name"],
+                    "form": tmpl.get("term", ""),
+                    "language_code": tmpl.get("lang", ""),
+                    "raw_template": tmpl.get("raw", ""),
+                }
+            )
 
         if not definitions:
             definitions = ["(definition not extracted)"]
@@ -389,8 +398,17 @@ class WiktionaryAdapter(SourceAdapter):
             params = match.group(2).split("|")
 
             # Only process etymology-relevant templates
-            if name not in ("inh", "inherited", "bor", "borrowed",
-                            "der", "derived", "cog", "cognate", "m"):
+            if name not in (
+                "inh",
+                "inherited",
+                "bor",
+                "borrowed",
+                "der",
+                "derived",
+                "cog",
+                "cognate",
+                "m",
+            ):
                 continue
 
             tmpl_dict: dict[str, str] = {"name": name, "raw": match.group(0)}

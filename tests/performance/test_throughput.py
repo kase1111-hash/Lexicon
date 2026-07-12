@@ -4,11 +4,11 @@ These tests measure the performance of key operations to ensure
 they meet performance requirements and to catch regressions.
 """
 
-import pytest
-import time
 import statistics
-from typing import Callable
-from uuid import uuid4
+import time
+from collections.abc import Callable
+
+import pytest
 
 from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR, Attestation
@@ -35,7 +35,7 @@ def measure_execution_time(func: Callable, iterations: int = 100) -> dict:
         "stdev": statistics.stdev(times) if len(times) > 1 else 0,
         "total": sum(times),
         "iterations": iterations,
-        "ops_per_second": iterations / sum(times) if sum(times) > 0 else float('inf'),
+        "ops_per_second": iterations / sum(times) if sum(times) > 0 else float("inf"),
     }
 
 
@@ -45,6 +45,7 @@ class TestLSRCreationPerformance:
 
     def test_simple_lsr_creation_throughput(self):
         """Measure throughput of simple LSR creation."""
+
         def create_lsr():
             return LSR(
                 form_orthographic="test",
@@ -55,10 +56,13 @@ class TestLSRCreationPerformance:
 
         # Should be able to create at least 1000 LSRs per second
         assert stats["ops_per_second"] > 1000, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nSimple LSR creation: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms")
+        print(
+            f"\nSimple LSR creation: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms"
+        )
 
     def test_complex_lsr_creation_throughput(self):
         """Measure throughput of complex LSR creation with all fields."""
+
         def create_complex_lsr():
             return LSR(
                 form_orthographic="water",
@@ -83,7 +87,9 @@ class TestLSRCreationPerformance:
 
         # Should be able to create at least 500 complex LSRs per second
         assert stats["ops_per_second"] > 500, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nComplex LSR creation: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms")
+        print(
+            f"\nComplex LSR creation: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms"
+        )
 
     def test_lsr_normalization_throughput(self):
         """Measure throughput of LSR form normalization."""
@@ -99,7 +105,9 @@ class TestLSRCreationPerformance:
 
         # Normalization should be very fast
         assert stats["ops_per_second"] > 5000, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nNormalization: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms")
+        print(
+            f"\nNormalization: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms"
+        )
 
 
 @pytest.mark.slow
@@ -150,10 +158,13 @@ class TestEntityResolutionPerformance:
         # Resolution with 1000-entry store - threshold based on measured performance
         # Note: Resolution scales linearly with store size due to similarity checking
         assert stats["ops_per_second"] > 10, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nResolution (no match): {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms")
+        print(
+            f"\nResolution (no match): {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms"
+        )
 
     def test_resolution_throughput_with_match(self, resolver_with_data):
         """Measure resolution throughput when match is found."""
+
         def resolve_existing():
             entry = RawLexicalEntry(
                 source_name="test",
@@ -168,7 +179,9 @@ class TestEntityResolutionPerformance:
 
         # Resolution with 1000-entry store - threshold based on measured performance
         assert stats["ops_per_second"] > 10, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nResolution (with match): {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms")
+        print(
+            f"\nResolution (with match): {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms"
+        )
 
     def test_batch_processing_throughput(self, resolver_with_data):
         """Measure batch processing throughput."""
@@ -193,7 +206,9 @@ class TestEntityResolutionPerformance:
 
         # Batch processing with 1000-entry store - threshold based on measured performance
         assert entries_per_second > 20, f"Too slow: {entries_per_second:.0f} entries/sec"
-        print(f"\nBatch processing: {entries_per_second:.0f} entries/sec, batch_time={stats['mean']*1000:.1f}ms")
+        print(
+            f"\nBatch processing: {entries_per_second:.0f} entries/sec, batch_time={stats['mean']*1000:.1f}ms"
+        )
 
 
 @pytest.mark.slow
@@ -221,7 +236,9 @@ class TestConversionPerformance:
 
         # Should be able to convert at least 1000 entries per second
         assert stats["ops_per_second"] > 1000, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nEntry to LSR conversion: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms")
+        print(
+            f"\nEntry to LSR conversion: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms"
+        )
 
     def test_lsr_to_graph_node_throughput(self):
         """Measure LSR to graph node conversion throughput."""
@@ -242,7 +259,9 @@ class TestConversionPerformance:
 
         # Should be very fast
         assert stats["ops_per_second"] > 5000, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nLSR to graph node: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms")
+        print(
+            f"\nLSR to graph node: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms"
+        )
 
     def test_lsr_to_search_document_throughput(self):
         """Measure LSR to search document conversion throughput."""
@@ -263,7 +282,9 @@ class TestConversionPerformance:
 
         # Should be very fast
         assert stats["ops_per_second"] > 5000, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nLSR to search doc: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms")
+        print(
+            f"\nLSR to search doc: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms"
+        )
 
 
 @pytest.mark.slow
@@ -272,6 +293,7 @@ class TestMergePerformance:
 
     def test_lsr_merge_throughput(self):
         """Measure LSR merge throughput."""
+
         def merge_pair():
             lsr1 = LSR(
                 form_orthographic="test",
@@ -292,18 +314,20 @@ class TestMergePerformance:
 
         # Should be able to merge at least 500 pairs per second
         assert stats["ops_per_second"] > 500, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nLSR merge: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms")
+        print(
+            f"\nLSR merge: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms"
+        )
 
     def test_merge_with_attestations_throughput(self):
         """Measure merge throughput with attestations."""
+
         def merge_with_attestations():
             lsr1 = LSR(
                 form_orthographic="test",
                 language_code="eng",
                 source_databases=["source1"],
                 attestations=[
-                    Attestation(text_excerpt=f"text {i}", text_date=1500 + i)
-                    for i in range(5)
+                    Attestation(text_excerpt=f"text {i}", text_date=1500 + i) for i in range(5)
                 ],
             )
             lsr2 = LSR(
@@ -311,8 +335,7 @@ class TestMergePerformance:
                 language_code="eng",
                 source_databases=["source2"],
                 attestations=[
-                    Attestation(text_excerpt=f"other {i}", text_date=1600 + i)
-                    for i in range(5)
+                    Attestation(text_excerpt=f"other {i}", text_date=1600 + i) for i in range(5)
                 ],
             )
             lsr1.merge_with(lsr2)
@@ -322,7 +345,9 @@ class TestMergePerformance:
 
         # Should handle attestations reasonably fast
         assert stats["ops_per_second"] > 200, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nMerge with attestations: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms")
+        print(
+            f"\nMerge with attestations: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.3f}ms"
+        )
 
 
 @pytest.mark.slow
@@ -342,7 +367,9 @@ class TestValidationPerformance:
 
         # Should be very fast
         assert stats["ops_per_second"] > 10000, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nString sanitization: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.4f}ms")
+        print(
+            f"\nString sanitization: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.4f}ms"
+        )
 
     def test_iso_code_sanitization_throughput(self):
         """Measure ISO code sanitization throughput."""
@@ -355,4 +382,6 @@ class TestValidationPerformance:
 
         # Should be very fast
         assert stats["ops_per_second"] > 50000, f"Too slow: {stats['ops_per_second']:.0f} ops/sec"
-        print(f"\nISO code sanitization: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.4f}ms")
+        print(
+            f"\nISO code sanitization: {stats['ops_per_second']:.0f} ops/sec, mean={stats['mean']*1000:.4f}ms"
+        )

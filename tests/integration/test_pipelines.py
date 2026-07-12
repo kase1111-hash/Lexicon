@@ -1,7 +1,6 @@
 """Integration tests for data pipelines."""
 
 import pytest
-from uuid import uuid4
 
 from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR

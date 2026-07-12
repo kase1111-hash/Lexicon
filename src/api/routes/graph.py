@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from src.exceptions import DatabaseError, LSRNotFoundError, ValidationError
+from src.exceptions import DatabaseError, ValidationError
 from src.utils.db import DatabaseManager, get_db
 from src.utils.validation import GraphQueryRequest
 
@@ -52,16 +52,16 @@ async def execute_query(
     """
     # Validate the query for safety
     try:
-        validation_request = GraphQueryRequest(query=query_input.query)
+        GraphQueryRequest(query=query_input.query)
     except ValueError as e:
         raise ValidationError(
             message=f"Invalid query: {e}",
             details={"query": query_input.query},
-        )
+        ) from e
 
     logger.info(f"Executing graph query: {query_input.query[:100]}...")
 
-    async def _run_read_query(tx, query, parameters):
+    async def _run_read_query(tx: Any, query: str, parameters: dict[str, Any]) -> Any:
         result = await tx.run(query, parameters)
         records = await result.fetch(1000)  # Limit to 1000 results
         return records
@@ -77,7 +77,7 @@ async def execute_query(
             results = []
             for record in records:
                 row = {}
-                for key in record.keys():
+                for key in record.keys():  # noqa: SIM118 - Record iteration yields values, not keys
                     value = record[key]
                     row[key] = _serialize_neo4j_value(value)
                 results.append(row)
@@ -90,10 +90,10 @@ async def execute_query(
             }
 
     except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}")
+        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
     except Exception as e:
         logger.error(f"Graph query failed: {e}")
-        raise DatabaseError(message="Query execution failed")
+        raise DatabaseError(message="Query execution failed") from e
 
 
 @router.get("/path")
@@ -134,10 +134,13 @@ async def get_path(
 
     try:
         async with db.neo4j_session() as session:
-            result = await session.run(query, {
-                "from_id": str(from_lsr),
-                "to_id": str(to_lsr),
-            })
+            result = await session.run(
+                query,
+                {
+                    "from_id": str(from_lsr),
+                    "to_id": str(to_lsr),
+                },
+            )
             records = await result.fetch(10)
 
             paths = []
@@ -155,10 +158,10 @@ async def get_path(
             }
 
     except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}")
+        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
     except Exception as e:
         logger.error(f"Path finding failed: {e}")
-        raise DatabaseError(message="Path finding failed")
+        raise DatabaseError(message="Path finding failed") from e
 
 
 @router.get("/etymology/{lsr_id}")
@@ -207,10 +210,10 @@ async def get_etymology_chain(
             }
 
     except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}")
+        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
     except Exception as e:
         logger.error(f"Etymology chain retrieval failed: {e}")
-        raise DatabaseError(message="Etymology chain retrieval failed")
+        raise DatabaseError(message="Etymology chain retrieval failed") from e
 
 
 @router.get("/cognates/{lsr_id}")
@@ -262,10 +265,10 @@ async def get_cognates(
             }
 
     except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}")
+        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
     except Exception as e:
         logger.error(f"Cognate retrieval failed: {e}")
-        raise DatabaseError(message="Cognate retrieval failed")
+        raise DatabaseError(message="Cognate retrieval failed") from e
 
 
 class BulkExportRequest(BaseModel):
@@ -280,7 +283,7 @@ class BulkExportRequest(BaseModel):
 async def create_bulk_export(
     request: BulkExportRequest,
     db: DatabaseManager = Depends(get_db_manager),
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """
     Create a bulk export job for LSRs in a language.
 
@@ -312,10 +315,10 @@ async def create_bulk_export(
             }
 
     except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}")
+        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
     except Exception as e:
         logger.error(f"Bulk export failed: {e}")
-        raise DatabaseError(message="Bulk export failed")
+        raise DatabaseError(message="Bulk export failed") from e
 
 
 @router.get("/bulk/status/{job_id}")
@@ -379,10 +382,12 @@ def _serialize_path(path: Any) -> dict[str, Any]:
 
     if hasattr(path, "relationships"):
         for rel in path.relationships:
-            relationships.append({
-                "type": rel.type if hasattr(rel, "type") else "UNKNOWN",
-                "properties": dict(rel.items()) if hasattr(rel, "items") else {},
-            })
+            relationships.append(
+                {
+                    "type": rel.type if hasattr(rel, "type") else "UNKNOWN",
+                    "properties": dict(rel.items()) if hasattr(rel, "items") else {},
+                }
+            )
 
     return {
         "nodes": nodes,

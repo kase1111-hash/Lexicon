@@ -3,10 +3,10 @@
 import hashlib
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from functools import wraps
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar, cast
 
-from src.config import get_settings
 from src.utils.db import get_db
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ class CacheManager:
     JSON serialization and error handling.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the cache manager."""
         self._enabled = True
 
@@ -203,7 +203,7 @@ def cached(
     prefix: str,
     ttl: int = DEFAULT_TTL,
     key_builder: Callable[..., str] | None = None,
-):
+) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Awaitable[T]]]:
     """
     Decorator for caching async function results.
 
@@ -218,7 +218,7 @@ def cached(
             ...
     """
 
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> T:
             # Build cache key
@@ -233,7 +233,7 @@ def cached(
 
             if cached_value is not None:
                 logger.debug(f"Cache hit for {cache_key}")
-                return cached_value
+                return cast(T, cached_value)
 
             # Call the function
             result = await func(*args, **kwargs)

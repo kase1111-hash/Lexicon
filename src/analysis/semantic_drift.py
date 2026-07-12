@@ -6,6 +6,7 @@ Analyzes how word meanings change over time using:
 3. Shift event detection (metaphor, metonymy, etc.)
 """
 
+import contextlib
 import logging
 import math
 from dataclasses import dataclass, field
@@ -56,28 +57,66 @@ class SemanticTrajectory:
 # Keywords that suggest specific types of semantic shifts
 SHIFT_INDICATORS = {
     "generalization": [
-        "general", "broad", "any", "various", "multiple", "diverse",
-        "extended", "expanded", "wider", "universal",
+        "general",
+        "broad",
+        "any",
+        "various",
+        "multiple",
+        "diverse",
+        "extended",
+        "expanded",
+        "wider",
+        "universal",
     ],
     "specialization": [
-        "specific", "particular", "narrow", "limited", "restricted",
-        "technical", "specialized", "precise", "exact",
+        "specific",
+        "particular",
+        "narrow",
+        "limited",
+        "restricted",
+        "technical",
+        "specialized",
+        "precise",
+        "exact",
     ],
     "metaphor": [
-        "figurative", "metaphor", "like", "as if", "symbolic",
-        "represents", "stands for", "imagery",
+        "figurative",
+        "metaphor",
+        "like",
+        "as if",
+        "symbolic",
+        "represents",
+        "stands for",
+        "imagery",
     ],
     "metonymy": [
-        "associated", "related", "connected", "part of", "aspect",
-        "attribute", "characteristic",
+        "associated",
+        "related",
+        "connected",
+        "part of",
+        "aspect",
+        "attribute",
+        "characteristic",
     ],
     "amelioration": [
-        "positive", "improved", "elevated", "noble", "prestigious",
-        "respected", "favorable", "better",
+        "positive",
+        "improved",
+        "elevated",
+        "noble",
+        "prestigious",
+        "respected",
+        "favorable",
+        "better",
     ],
     "pejoration": [
-        "negative", "degraded", "lowered", "vulgar", "derogatory",
-        "offensive", "unfavorable", "worse",
+        "negative",
+        "degraded",
+        "lowered",
+        "vulgar",
+        "derogatory",
+        "offensive",
+        "unfavorable",
+        "worse",
     ],
 }
 
@@ -148,10 +187,7 @@ class SemanticDriftAnalyzer:
                 return None
 
         # Filter by language and sort by date
-        entries = [
-            e for e in lsr_entries
-            if e.get("language_code") == language
-        ]
+        entries = [e for e in lsr_entries if e.get("language_code") == language]
 
         if not entries:
             return None
@@ -200,10 +236,8 @@ class SemanticDriftAnalyzer:
         # Get LSR ID from first entry if available
         lsr_id = None
         if entries and entries[0].get("id"):
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 lsr_id = UUID(entries[0]["id"])
-            except (ValueError, TypeError):
-                pass
 
         return SemanticTrajectory(
             lsr_id=lsr_id,
@@ -237,10 +271,7 @@ class SemanticDriftAnalyzer:
             return []
 
         # Filter by threshold
-        return [
-            event for event in trajectory.shift_events
-            if event.magnitude >= threshold
-        ]
+        return [event for event in trajectory.shift_events if event.magnitude >= threshold]
 
     def compare_trajectories(
         self,
@@ -262,10 +293,7 @@ class SemanticDriftAnalyzer:
             trajectories[lang] = self.get_trajectory(form, lang)
 
         # Remove None values
-        valid_trajectories = {
-            lang: traj for lang, traj in trajectories.items()
-            if traj is not None
-        }
+        valid_trajectories = {lang: traj for lang, traj in trajectories.items() if traj is not None}
 
         if not valid_trajectories:
             return {
@@ -297,7 +325,7 @@ class SemanticDriftAnalyzer:
         # Find most/least divergent pairs
         pairs = []
         for i, lang1 in enumerate(lang_list):
-            for lang2 in lang_list[i + 1:]:
+            for lang2 in lang_list[i + 1 :]:
                 pairs.append((lang1, lang2, divergence_matrix[lang1][lang2]))
 
         pairs.sort(key=lambda x: x[2])
@@ -381,15 +409,17 @@ class SemanticDriftAnalyzer:
                     curr.definition,
                 )
 
-                shifts.append(ShiftEvent(
-                    date=curr.date,
-                    change_type=shift_type,
-                    confidence=min(prev.confidence, curr.confidence),
-                    magnitude=min(1.0, distance),
-                    before_meaning=prev.definition,
-                    after_meaning=curr.definition,
-                    evidence=f"Semantic distance: {distance:.3f}",
-                ))
+                shifts.append(
+                    ShiftEvent(
+                        date=curr.date,
+                        change_type=shift_type,
+                        confidence=min(prev.confidence, curr.confidence),
+                        magnitude=min(1.0, distance),
+                        before_meaning=prev.definition,
+                        after_meaning=curr.definition,
+                        evidence=f"Semantic distance: {distance:.3f}",
+                    )
+                )
 
         return shifts
 
@@ -425,7 +455,7 @@ class SemanticDriftAnalyzer:
         if not scores:
             return "general"
 
-        best_type = max(scores, key=scores.get)
+        best_type = max(scores, key=lambda k: scores[k])
         if scores[best_type] > 0:
             return best_type
 
@@ -462,7 +492,7 @@ class SemanticDriftAnalyzer:
         emb2 = emb2[:min_len]
 
         # Calculate cosine similarity
-        dot_product = sum(a * b for a, b in zip(emb1, emb2))
+        dot_product = sum(a * b for a, b in zip(emb1, emb2, strict=False))
         norm1 = math.sqrt(sum(a * a for a in emb1))
         norm2 = math.sqrt(sum(b * b for b in emb2))
 
@@ -560,7 +590,7 @@ class SemanticDriftAnalyzer:
         drift_diff = abs(traj1.total_drift - traj2.total_drift)
 
         # Combined score
-        return (current_divergence * 0.7 + min(1.0, drift_diff) * 0.3)
+        return current_divergence * 0.7 + min(1.0, drift_diff) * 0.3
 
 
 # Convenience functions for API use

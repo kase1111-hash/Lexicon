@@ -1,11 +1,12 @@
 """LSR (Lexical State Record) API routes."""
 
 import logging
+from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from src.exceptions import DatabaseError, InvalidDateRangeError, LSRNotFoundError
+from src.exceptions import DatabaseError, InvalidDateRangeError
 from src.models import ErrorResponse
 from src.models.lsr import LSR
 from src.repositories.lsr_repository import LSRRepository
@@ -17,13 +18,12 @@ from src.utils.cache import (
     invalidate_search_cache,
     make_cache_key,
 )
-from src.utils.db import DatabaseManager, get_db
+from src.utils.db import get_db
 from src.utils.validation import (
     LSRCreateRequest,
     sanitize_iso_code,
     sanitize_string,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ async def search_lsr(
     cached = await cache.get(cache_key)
     if cached:
         logger.debug(f"Cache hit for search: {cache_key}")
-        return cached
+        return cast(dict, cached)
 
     # Perform search
     results, total = await repo.search(
@@ -142,7 +142,7 @@ async def get_lsr(
     cached = await cache.get(cache_key)
     if cached:
         logger.debug(f"Cache hit for LSR: {lsr_id}")
-        return cached
+        return cast(dict, cached)
 
     logger.info(f"Fetching LSR: {lsr_id}")
     lsr = await repo.get_by_id(lsr_id)
@@ -257,15 +257,17 @@ async def get_etymology(
             path = record["path"]
             chain = []
             for node in path.nodes:
-                chain.append({
-                    "id": dict(node).get("id"),
-                    "form": dict(node).get("form_orthographic"),
-                    "language_code": dict(node).get("language_code"),
-                    "language_name": dict(node).get("language_name"),
-                    "date_start": dict(node).get("date_start"),
-                    "date_end": dict(node).get("date_end"),
-                    "definition": dict(node).get("definition_primary"),
-                })
+                chain.append(
+                    {
+                        "id": dict(node).get("id"),
+                        "form": dict(node).get("form_orthographic"),
+                        "language_code": dict(node).get("language_code"),
+                        "language_name": dict(node).get("language_name"),
+                        "date_start": dict(node).get("date_start"),
+                        "date_end": dict(node).get("date_end"),
+                        "definition": dict(node).get("definition_primary"),
+                    }
+                )
 
             return {
                 "lsr_id": str(lsr_id),
@@ -275,10 +277,10 @@ async def get_etymology(
             }
 
     except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}")
+        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
     except Exception as e:
         logger.error(f"Etymology chain retrieval failed: {e}")
-        raise DatabaseError(message=f"Etymology chain retrieval failed: {e}")
+        raise DatabaseError(message=f"Etymology chain retrieval failed: {e}") from e
 
 
 @router.get(
@@ -315,15 +317,17 @@ async def get_descendants(
             for record in records:
                 node = record["descendant"]
                 props = dict(node)
-                descendants.append({
-                    "id": props.get("id"),
-                    "form": props.get("form_orthographic"),
-                    "language_code": props.get("language_code"),
-                    "language_name": props.get("language_name"),
-                    "date_start": props.get("date_start"),
-                    "date_end": props.get("date_end"),
-                    "definition": props.get("definition_primary"),
-                })
+                descendants.append(
+                    {
+                        "id": props.get("id"),
+                        "form": props.get("form_orthographic"),
+                        "language_code": props.get("language_code"),
+                        "language_name": props.get("language_name"),
+                        "date_start": props.get("date_start"),
+                        "date_end": props.get("date_end"),
+                        "definition": props.get("definition_primary"),
+                    }
+                )
 
             return {
                 "lsr_id": str(lsr_id),
@@ -333,10 +337,10 @@ async def get_descendants(
             }
 
     except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}")
+        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
     except Exception as e:
         logger.error(f"Descendant retrieval failed: {e}")
-        raise DatabaseError(message=f"Descendant retrieval failed: {e}")
+        raise DatabaseError(message=f"Descendant retrieval failed: {e}") from e
 
 
 @router.get(
@@ -400,10 +404,10 @@ async def get_cognates(
             }
 
     except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}")
+        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
     except Exception as e:
         logger.error(f"Cognate retrieval failed: {e}")
-        raise DatabaseError(message=f"Cognate retrieval failed: {e}")
+        raise DatabaseError(message=f"Cognate retrieval failed: {e}") from e
 
 
 @router.get(
@@ -448,13 +452,15 @@ async def get_borrowings(
             borrowed_from = []
             for record in source_records:
                 props = dict(record["donor"])
-                borrowed_from.append({
-                    "id": props.get("id"),
-                    "form": props.get("form_orthographic"),
-                    "language_code": props.get("language_code"),
-                    "language_name": props.get("language_name"),
-                    "definition": props.get("definition_primary"),
-                })
+                borrowed_from.append(
+                    {
+                        "id": props.get("id"),
+                        "form": props.get("form_orthographic"),
+                        "language_code": props.get("language_code"),
+                        "language_name": props.get("language_name"),
+                        "definition": props.get("definition_primary"),
+                    }
+                )
 
             # Get loan targets (words that borrowed from this LSR)
             target_result = await session.run(target_query, {"lsr_id": str(lsr_id)})
@@ -463,13 +469,15 @@ async def get_borrowings(
             borrowed_to = []
             for record in target_records:
                 props = dict(record["recipient"])
-                borrowed_to.append({
-                    "id": props.get("id"),
-                    "form": props.get("form_orthographic"),
-                    "language_code": props.get("language_code"),
-                    "language_name": props.get("language_name"),
-                    "definition": props.get("definition_primary"),
-                })
+                borrowed_to.append(
+                    {
+                        "id": props.get("id"),
+                        "form": props.get("form_orthographic"),
+                        "language_code": props.get("language_code"),
+                        "language_name": props.get("language_name"),
+                        "definition": props.get("definition_primary"),
+                    }
+                )
 
             return {
                 "lsr_id": str(lsr_id),
@@ -478,7 +486,7 @@ async def get_borrowings(
             }
 
     except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}")
+        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
     except Exception as e:
         logger.error(f"Borrowing retrieval failed: {e}")
-        raise DatabaseError(message=f"Borrowing retrieval failed: {e}")
+        raise DatabaseError(message=f"Borrowing retrieval failed: {e}") from e

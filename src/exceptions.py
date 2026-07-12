@@ -34,7 +34,7 @@ class LexiconError(Exception):
 
     def to_dict(self) -> dict[str, Any]:
         """Convert exception to dictionary for API responses."""
-        result = {
+        result: dict[str, Any] = {
             "error": self.code,
             "message": self.message,
         }
@@ -372,7 +372,7 @@ class InsufficientDataError(AnalysisError):
         message = "Insufficient data for analysis"
         if analysis_type:
             message = f"Insufficient data for {analysis_type} analysis"
-        details = {}
+        details: dict[str, Any] = {}
         if analysis_type:
             details["analysis_type"] = analysis_type
         if minimum_required is not None:

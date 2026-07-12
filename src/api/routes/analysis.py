@@ -17,7 +17,6 @@ from src.utils.validation import (
     sanitize_string,
 )
 
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -58,9 +57,7 @@ async def _build_lsr_lookup(db: DatabaseManager, language: str) -> dict[str, dic
     return lookup
 
 
-async def _build_borrowing_data(
-    db: DatabaseManager, language: str
-) -> list[dict]:
+async def _build_borrowing_data(db: DatabaseManager, language: str) -> list[dict]:
     """Load borrowing relationship data from Neo4j for contact detection."""
     borrowings: list[dict] = []
     try:
@@ -81,23 +78,25 @@ async def _build_borrowing_data(
             for record in records:
                 date_start = record["date_start"]
                 date_end = record["date_end"]
-                borrowings.append({
-                    "form": record["form"],
-                    "source_lang": record["donor_language"],
-                    "target_lang": record["recipient_language"],
-                    "date": (date_start + date_end) // 2 if date_start and date_end else date_start,
-                    "date_start": date_start,
-                    "date_end": date_end,
-                    "definition": record["definition"],
-                })
+                borrowings.append(
+                    {
+                        "form": record["form"],
+                        "source_lang": record["donor_language"],
+                        "target_lang": record["recipient_language"],
+                        "date": (
+                            (date_start + date_end) // 2 if date_start and date_end else date_start
+                        ),
+                        "date_start": date_start,
+                        "date_end": date_end,
+                        "definition": record["definition"],
+                    }
+                )
     except Exception as e:
         logger.warning(f"Could not load borrowing data from Neo4j: {e}")
     return borrowings
 
 
-async def _build_trajectory_data(
-    db: DatabaseManager, form: str, language: str
-) -> list[dict]:
+async def _build_trajectory_data(db: DatabaseManager, form: str, language: str) -> list[dict]:
     """Load LSR data for a word across time periods for semantic drift analysis."""
     points: list[dict] = []
     try:
@@ -116,14 +115,16 @@ async def _build_trajectory_data(
             )
             records = await result.fetch(1000)
             for record in records:
-                points.append({
-                    "form": record["form"],
-                    "date_start": record["date_start"],
-                    "date_end": record["date_end"],
-                    "definition_primary": record["definition"],
-                    "language_code": language,
-                    "id": record["id"],
-                })
+                points.append(
+                    {
+                        "form": record["form"],
+                        "date_start": record["date_start"],
+                        "date_end": record["date_end"],
+                        "definition_primary": record["definition"],
+                        "language_code": language,
+                        "id": record["id"],
+                    }
+                )
     except Exception as e:
         logger.warning(f"Could not load trajectory data from Neo4j: {e}")
     return points
@@ -342,7 +343,9 @@ async def compare_concept(
     if not concept:
         raise ValidationError(message="Concept is required", field="concept")
     if not language_list:
-        raise ValidationError(message="At least one valid language code is required", field="languages")
+        raise ValidationError(
+            message="At least one valid language code is required", field="languages"
+        )
     if len(language_list) > 10:
         raise ValidationError(message="Maximum 10 languages allowed", field="languages")
 
@@ -363,10 +366,7 @@ async def compare_concept(
 
         if trajectory:
             lang_result["trajectory"] = {
-                "points": [
-                    {"date": p.date, "definition": p.definition}
-                    for p in trajectory.points
-                ],
+                "points": [{"date": p.date, "definition": p.definition} for p in trajectory.points],
                 "total_drift": trajectory.total_drift,
                 "stability_score": trajectory.stability_score,
             }

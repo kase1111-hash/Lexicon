@@ -7,7 +7,6 @@ Supports:
 - Relationship (edge) creation and batch insertion
 """
 
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -21,14 +20,16 @@ logger = logging.getLogger(__name__)
 
 # Allowlist of valid relationship types for Cypher queries.
 # Prevents Cypher injection via relationship type interpolation.
-VALID_RELATIONSHIP_TYPES = frozenset({
-    "DESCENDS_FROM",
-    "BORROWED_FROM",
-    "COGNATE_OF",
-    "SHIFTED_TO",
-    "MERGED_WITH",
-    "RELATED_TO",
-})
+VALID_RELATIONSHIP_TYPES = frozenset(
+    {
+        "DESCENDS_FROM",
+        "BORROWED_FROM",
+        "COGNATE_OF",
+        "SHIFTED_TO",
+        "MERGED_WITH",
+        "RELATED_TO",
+    }
+)
 
 # Elasticsearch index configuration
 ES_INDEX_NAME = "lexicon_lsr"
@@ -148,10 +149,10 @@ class LSRRepository:
                     return lsr
                 raise DatabaseError(message="Failed to create LSR - no record returned")
         except RuntimeError as e:
-            raise DatabaseError(message=f"Neo4j not connected: {e}")
+            raise DatabaseError(message=f"Neo4j not connected: {e}") from e
         except Exception as e:
             logger.error(f"Failed to create LSR {lsr.id}: {e}")
-            raise DatabaseError(message=f"Failed to create LSR: {e}")
+            raise DatabaseError(message=f"Failed to create LSR: {e}") from e
 
     async def get_by_id(self, lsr_id: UUID) -> LSR:
         """
@@ -182,10 +183,10 @@ class LSRRepository:
         except LSRNotFoundError:
             raise
         except RuntimeError as e:
-            raise DatabaseError(message=f"Neo4j not connected: {e}")
+            raise DatabaseError(message=f"Neo4j not connected: {e}") from e
         except Exception as e:
             logger.error(f"Failed to get LSR {lsr_id}: {e}")
-            raise DatabaseError(message=f"Failed to get LSR: {e}")
+            raise DatabaseError(message=f"Failed to get LSR: {e}") from e
 
     async def update(self, lsr: LSR) -> LSR:
         """
@@ -239,10 +240,10 @@ class LSRRepository:
         except LSRNotFoundError:
             raise
         except RuntimeError as e:
-            raise DatabaseError(message=f"Neo4j not connected: {e}")
+            raise DatabaseError(message=f"Neo4j not connected: {e}") from e
         except Exception as e:
             logger.error(f"Failed to update LSR {lsr.id}: {e}")
-            raise DatabaseError(message=f"Failed to update LSR: {e}")
+            raise DatabaseError(message=f"Failed to update LSR: {e}") from e
 
     async def delete(self, lsr_id: UUID) -> bool:
         """
@@ -276,18 +277,16 @@ class LSRRepository:
         except LSRNotFoundError:
             raise
         except RuntimeError as e:
-            raise DatabaseError(message=f"Neo4j not connected: {e}")
+            raise DatabaseError(message=f"Neo4j not connected: {e}") from e
         except Exception as e:
             logger.error(f"Failed to delete LSR {lsr_id}: {e}")
-            raise DatabaseError(message=f"Failed to delete LSR: {e}")
+            raise DatabaseError(message=f"Failed to delete LSR: {e}") from e
 
     # -------------------------------------------------------------------------
     # Batch operations
     # -------------------------------------------------------------------------
 
-    async def create_batch(
-        self, lsrs: list[LSR], batch_size: int = 100
-    ) -> BatchResult:
+    async def create_batch(self, lsrs: list[LSR], batch_size: int = 100) -> BatchResult:
         """Create multiple LSRs in batches using UNWIND.
 
         Uses Neo4j UNWIND for efficient batch insertion instead of
@@ -349,9 +348,7 @@ class LSRRepository:
 
             except Exception as e:
                 result.failed += len(chunk)
-                result.errors.append(
-                    f"Batch {i // batch_size}: {e}"
-                )
+                result.errors.append(f"Batch {i // batch_size}: {e}")
                 logger.error(f"Batch create failed at offset {i}: {e}")
 
         logger.info(
@@ -425,12 +422,8 @@ class LSRRepository:
                         result.succeeded += created
                 except Exception as e:
                     result.failed += len(chunk)
-                    result.errors.append(
-                        f"Batch {rel_type} at offset {i}: {e}"
-                    )
-                    logger.error(
-                        f"Batch relationship create failed ({rel_type}, offset {i}): {e}"
-                    )
+                    result.errors.append(f"Batch {rel_type} at offset {i}: {e}")
+                    logger.error(f"Batch relationship create failed ({rel_type}, offset {i}): {e}")
 
         logger.info(
             f"Batch relationships: {result.succeeded} created, "
@@ -459,28 +452,28 @@ class LSRRepository:
                     "ORDER BY cnt DESC LIMIT 50"
                 )
                 records = await res.fetch(50)
-                stats["by_language"] = {
-                    r["lang"]: r["cnt"] for r in records if r["lang"]
-                }
+                stats["by_language"] = {r["lang"]: r["cnt"] for r in records if r["lang"]}
 
                 # Relationship counts
                 for rel_type in [
-                    "DESCENDS_FROM", "BORROWED_FROM", "COGNATE_OF",
-                    "SHIFTED_TO", "MERGED_WITH",
+                    "DESCENDS_FROM",
+                    "BORROWED_FROM",
+                    "COGNATE_OF",
+                    "SHIFTED_TO",
+                    "MERGED_WITH",
                 ]:
-                    res = await session.run(
-                        f"MATCH ()-[r:{rel_type}]->() RETURN count(r) AS cnt"
-                    )
+                    res = await session.run(f"MATCH ()-[r:{rel_type}]->() RETURN count(r) AS cnt")
                     record = await res.single()
-                    stats[f"rel_{rel_type.lower()}"] = (
-                        record["cnt"] if record else 0
-                    )
+                    stats[f"rel_{rel_type.lower()}"] = record["cnt"] if record else 0
 
                 stats["total_relationships"] = sum(
                     stats.get(f"rel_{t.lower()}", 0)
                     for t in [
-                        "DESCENDS_FROM", "BORROWED_FROM", "COGNATE_OF",
-                        "SHIFTED_TO", "MERGED_WITH",
+                        "DESCENDS_FROM",
+                        "BORROWED_FROM",
+                        "COGNATE_OF",
+                        "SHIFTED_TO",
+                        "MERGED_WITH",
                     ]
                 )
 
@@ -532,20 +525,26 @@ class LSRRepository:
         if self._has_elasticsearch():
             try:
                 return await self._search_elasticsearch(
-                    form=form, language=language,
-                    date_start=date_start, date_end=date_end,
+                    form=form,
+                    language=language,
+                    date_start=date_start,
+                    date_end=date_end,
                     semantic_field=semantic_field,
-                    limit=limit, offset=offset,
+                    limit=limit,
+                    offset=offset,
                 )
             except Exception as e:
                 logger.warning(f"Elasticsearch search failed, falling back to Neo4j: {e}")
 
         # Fall back to Neo4j
         return await self._search_neo4j(
-            form=form, language=language,
-            date_start=date_start, date_end=date_end,
+            form=form,
+            language=language,
+            date_start=date_start,
+            date_end=date_end,
             semantic_field=semantic_field,
-            limit=limit, offset=offset,
+            limit=limit,
+            offset=offset,
         )
 
     async def _search_neo4j(
@@ -614,10 +613,10 @@ class LSRRepository:
 
                 return lsrs, total
         except RuntimeError as e:
-            raise DatabaseError(message=f"Neo4j not connected: {e}")
+            raise DatabaseError(message=f"Neo4j not connected: {e}") from e
         except Exception as e:
             logger.error(f"Failed to search LSRs: {e}")
-            raise DatabaseError(message=f"Failed to search LSRs: {e}")
+            raise DatabaseError(message=f"Failed to search LSRs: {e}") from e
 
     async def _search_elasticsearch(
         self,
@@ -634,30 +633,28 @@ class LSRRepository:
         filter_clauses: list[dict] = []
 
         if form:
-            must_clauses.append({
-                "multi_match": {
-                    "query": form,
-                    "fields": [
-                        "form_orthographic^3",
-                        "form_normalized^2",
-                        "definition_primary",
-                    ],
-                    "fuzziness": "AUTO",
-                },
-            })
+            must_clauses.append(
+                {
+                    "multi_match": {
+                        "query": form,
+                        "fields": [
+                            "form_orthographic^3",
+                            "form_normalized^2",
+                            "definition_primary",
+                        ],
+                        "fuzziness": "AUTO",
+                    },
+                }
+            )
 
         if language:
             filter_clauses.append({"term": {"language_code": language}})
 
         if date_start is not None:
-            filter_clauses.append(
-                {"range": {"date_start": {"gte": date_start}}}
-            )
+            filter_clauses.append({"range": {"date_start": {"gte": date_start}}})
 
         if date_end is not None:
-            filter_clauses.append(
-                {"range": {"date_end": {"lte": date_end}}}
-            )
+            filter_clauses.append({"range": {"date_end": {"lte": date_end}}})
 
         if semantic_field:
             filter_clauses.append({"term": {"semantic_fields": semantic_field}})
@@ -723,9 +720,7 @@ class LSRRepository:
             es = self.db.elasticsearch
             exists = await es.indices.exists(index=ES_INDEX_NAME)
             if not exists:
-                await es.indices.create(
-                    index=ES_INDEX_NAME, body=ES_INDEX_SETTINGS
-                )
+                await es.indices.create(index=ES_INDEX_NAME, body=ES_INDEX_SETTINGS)
                 logger.info(f"Created Elasticsearch index: {ES_INDEX_NAME}")
             return True
         except Exception as e:
@@ -755,9 +750,7 @@ class LSRRepository:
                 "source_databases": lsr.source_databases,
             }
             es = self.db.elasticsearch
-            await es.index(
-                index=ES_INDEX_NAME, id=str(lsr.id), document=doc
-            )
+            await es.index(index=ES_INDEX_NAME, id=str(lsr.id), document=doc)
         except Exception as e:
             # Don't fail the main operation if ES indexing fails
             logger.debug(f"ES index failed for {lsr.id}: {e}")
@@ -806,9 +799,7 @@ class LSRRepository:
         except Exception as e:
             result.errors.append(f"Reindex failed: {e}")
 
-        logger.info(
-            f"ES reindex: {result.succeeded} indexed, {result.failed} failed"
-        )
+        logger.info(f"ES reindex: {result.succeeded} indexed, {result.failed} failed")
         return result
 
     # -------------------------------------------------------------------------

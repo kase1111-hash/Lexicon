@@ -64,7 +64,7 @@ class TestPackageImports:
     def test_utils_imports(self):
         """Test utilities module imports."""
         from src.utils.phonetics import PhoneticUtils
-        from src.utils.validation import sanitize_string, is_valid_iso639_3
+        from src.utils.validation import is_valid_iso639_3, sanitize_string
 
         assert PhoneticUtils is not None
         assert callable(sanitize_string)
@@ -113,7 +113,7 @@ class TestModelFunctionality:
 
     def test_lsr_attestation_management(self):
         """Test adding attestations to LSR."""
-        from src.models.lsr import Attestation, LSR
+        from src.models.lsr import LSR, Attestation
 
         lsr = LSR(form_orthographic="water")
         att = Attestation(
@@ -130,7 +130,7 @@ class TestModelFunctionality:
 
     def test_lsr_confidence_calculation(self):
         """Test confidence score calculation."""
-        from src.models.lsr import Attestation, LSR
+        from src.models.lsr import LSR, Attestation
 
         lsr = LSR(form_orthographic="test")
 
@@ -292,7 +292,7 @@ class TestLSRMerging:
 
     def test_merge_attestations(self):
         """Test merging attestations from two LSRs."""
-        from src.models.lsr import Attestation, LSR
+        from src.models.lsr import LSR, Attestation
 
         lsr1 = LSR(form_orthographic="word")
         lsr1.add_attestation(
@@ -346,7 +346,9 @@ class TestBuildSystem:
         from src import __version__
 
         file_version = version_file.read_text().strip()
-        assert file_version == __version__, f"VERSION file ({file_version}) doesn't match package ({__version__})"
+        assert (
+            file_version == __version__
+        ), f"VERSION file ({file_version}) doesn't match package ({__version__})"
 
     def test_package_structure(self):
         """Test that package structure is correct."""

@@ -20,7 +20,6 @@ from datetime import UTC, datetime
 from typing import Any, TypeVar
 from uuid import uuid4
 
-
 # Context variable for request correlation ID
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
 
@@ -377,7 +376,9 @@ def log_call(
             # Build argument string
             if log_args:
                 arg_strs = [_truncate(repr(a), max_arg_length) for a in args]
-                kwarg_strs = [f"{k}={_truncate(repr(v), max_arg_length)}" for k, v in kwargs.items()]
+                kwarg_strs = [
+                    f"{k}={_truncate(repr(v), max_arg_length)}" for k, v in kwargs.items()
+                ]
                 all_args = ", ".join(arg_strs + kwarg_strs)
                 _logger.log(level, f"Calling {func.__name__}({all_args})")
             else:
@@ -386,7 +387,9 @@ def log_call(
             result = func(*args, **kwargs)
 
             if log_result:
-                _logger.log(level, f"{func.__name__} returned: {_truncate(repr(result), max_arg_length)}")
+                _logger.log(
+                    level, f"{func.__name__} returned: {_truncate(repr(result), max_arg_length)}"
+                )
 
             return result
 
@@ -397,7 +400,9 @@ def log_call(
 
             if log_args:
                 arg_strs = [_truncate(repr(a), max_arg_length) for a in args]
-                kwarg_strs = [f"{k}={_truncate(repr(v), max_arg_length)}" for k, v in kwargs.items()]
+                kwarg_strs = [
+                    f"{k}={_truncate(repr(v), max_arg_length)}" for k, v in kwargs.items()
+                ]
                 all_args = ", ".join(arg_strs + kwarg_strs)
                 _logger.log(level, f"Calling {func.__name__}({all_args})")
             else:
@@ -406,7 +411,9 @@ def log_call(
             result = await func(*args, **kwargs)
 
             if log_result:
-                _logger.log(level, f"{func.__name__} returned: {_truncate(repr(result), max_arg_length)}")
+                _logger.log(
+                    level, f"{func.__name__} returned: {_truncate(repr(result), max_arg_length)}"
+                )
 
             return result
 

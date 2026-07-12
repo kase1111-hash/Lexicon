@@ -1,9 +1,7 @@
 """Unit tests for utility modules."""
 
-import pytest
-
-from src.utils.phonetics import PhoneticUtils
 from src.utils.embeddings import EmbeddingUtils
+from src.utils.phonetics import PhoneticUtils
 
 
 class TestPhoneticUtils:

@@ -5,7 +5,6 @@ don't cause unexpected behavior or data corruption.
 """
 
 import pytest
-from uuid import uuid4
 
 from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR
@@ -123,12 +122,6 @@ class TestThresholdEdgeCases:
 
     def test_score_exactly_at_auto_merge_threshold(self):
         """Test behavior when score is exactly at auto merge threshold."""
-        resolver = EntityResolver(
-            auto_merge_threshold=0.95,
-            merge_with_flag_threshold=0.85,
-            review_threshold=0.70,
-        )
-
         # Create result at exact threshold
         result = ResolutionResult(
             action=ResolutionAction.AUTO_MERGE,

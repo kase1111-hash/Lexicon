@@ -7,7 +7,6 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
-
 logger = logging.getLogger(__name__)
 
 # Type variables for generic pipeline
@@ -153,9 +152,11 @@ class BasePipeline(ABC, Generic[InputT, OutputT]):
             processed_count=self.stats.total_succeeded,
             failed_count=self.stats.total_failed,
             errors=errors,
-            duration_seconds=(self.stats.end_time - self.stats.start_time).total_seconds()
-            if self.stats.start_time and self.stats.end_time
-            else 0.0,
+            duration_seconds=(
+                (self.stats.end_time - self.stats.start_time).total_seconds()
+                if self.stats.start_time and self.stats.end_time
+                else 0.0
+            ),
         )
 
     def validate_input(self, item: InputT) -> list[str]:

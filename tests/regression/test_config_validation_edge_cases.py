@@ -5,28 +5,26 @@ handle edge cases correctly without breaking.
 """
 
 import pytest
-from unittest.mock import patch
-import os
 
 from src.config import (
     APIConfig,
     DatabaseConfig,
-    LoggingConfig,
     ErrorTrackingConfig,
+    LoggingConfig,
     Settings,
     get_settings,
     reload_settings,
 )
 from src.exceptions import (
-    ValidationError,
     InvalidDateRangeError,
     InvalidLanguageCodeError,
     LexiconError,
+    ValidationError,
 )
 from src.utils.validation import (
-    sanitize_string,
-    sanitize_iso_code,
     is_valid_year_range,
+    sanitize_iso_code,
+    sanitize_string,
 )
 
 
@@ -120,9 +118,7 @@ class TestConfigurationEdgeCases:
         assert config_wildcard.cors_origins_list == ["*"]
 
         # Multiple origins
-        config_multi = APIConfig(
-            cors_origins="http://localhost:3000,http://localhost:8080"
-        )
+        config_multi = APIConfig(cors_origins="http://localhost:3000,http://localhost:8080")
         assert len(config_multi.cors_origins_list) == 2
 
         # Single origin

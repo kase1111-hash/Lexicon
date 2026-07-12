@@ -1,7 +1,5 @@
 """Unit tests for custom exceptions."""
 
-import pytest
-
 from src.exceptions import (
     AnalysisError,
     AuthenticationError,

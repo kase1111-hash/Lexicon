@@ -9,15 +9,14 @@ Tests cover:
 6. CLI extract-relationships command logic
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
 
 from src.models.lsr import LSR
 from src.pipelines.relationship_extraction import (
     RelationshipExtractor,
     RelationshipType,
-    RawRelationship,
-    ExtractedRelationship,
 )
 from src.pipelines.validation import (
     ValidationResult,
@@ -45,9 +44,7 @@ class TestEtymologyTextParsing:
 
     def test_from_proto_germanic(self, extractor):
         """'From Proto-Germanic *X' -> DESCENDS_FROM with reconstructed flag."""
-        rels = extractor.extract_from_etymology_text(
-            "From Proto-Germanic *watōr"
-        )
+        rels = extractor.extract_from_etymology_text("From Proto-Germanic *watōr")
         gem_rels = [r for r in rels if r.target_language_code == "gem-pro"]
         assert len(gem_rels) >= 1
         assert gem_rels[0].is_reconstructed is True
@@ -93,16 +90,12 @@ class TestEtymologyTextParsing:
 
     def test_unrecognized_language(self, extractor):
         """Unrecognized language names are skipped."""
-        rels = extractor.extract_from_etymology_text(
-            "From Klingon tlhIngan"
-        )
+        rels = extractor.extract_from_etymology_text("From Klingon tlhIngan")
         assert len(rels) == 0
 
     def test_borrowed_context_detection(self, extractor):
         """Context before 'from' can change type to BORROWED_FROM."""
-        rels = extractor.extract_from_etymology_text(
-            "Loan from Latin computare"
-        )
+        rels = extractor.extract_from_etymology_text("Loan from Latin computare")
         # "Loan ... from Latin" context should produce BORROWED_FROM
         lat_rels = [r for r in rels if r.target_language_code == "lat"]
         if lat_rels:
@@ -218,9 +211,7 @@ class TestCognateDetection:
     def test_dissimilar_forms_excluded(self, store_and_extractor):
         """water ~ eau should not be detected with high threshold."""
         store, extractor, water_eng, wasser_deu, eau_fra = store_and_extractor
-        cognates = extractor.detect_cognates(
-            water_eng.id, [eau_fra.id], min_similarity=0.8
-        )
+        cognates = extractor.detect_cognates(water_eng.id, [eau_fra.id], min_similarity=0.8)
         assert len(cognates) == 0
 
     def test_same_language_excluded(self, store_and_extractor):
@@ -458,8 +449,12 @@ class TestValidationRunAll:
     def test_batch_validation(self):
         validator = Validator()
         lsrs = [
-            {"form_orthographic": "water", "language_code": "eng",
-             "definition_primary": "liquid", "source_databases": ["wikt"]},
+            {
+                "form_orthographic": "water",
+                "language_code": "eng",
+                "definition_primary": "liquid",
+                "source_databases": ["wikt"],
+            },
             {"form_orthographic": "", "language_code": ""},
         ]
         reports = validator.validate_batch(lsrs)
@@ -474,6 +469,7 @@ class TestWiktionaryEtymologyParsing:
     def test_extract_etymology_raw_single(self):
         """Single etymology section extracted correctly."""
         from src.adapters.wiktionary import WiktionaryAdapter
+
         adapter = WiktionaryAdapter()
 
         content = """===Etymology===
@@ -490,6 +486,7 @@ From {{inh|en|enm|water}}, from {{inh|en|ang|wæter}}.
     def test_extract_etymology_raw_numbered(self):
         """Numbered etymology sections: Etymology 1 is extracted."""
         from src.adapters.wiktionary import WiktionaryAdapter
+
         adapter = WiktionaryAdapter()
 
         content = """===Etymology 1===
@@ -512,9 +509,12 @@ From {{bor|en|nl|bak}}.
     def test_extract_etymology_templates(self):
         """Templates are parsed from raw etymology text."""
         from src.adapters.wiktionary import WiktionaryAdapter
+
         adapter = WiktionaryAdapter()
 
-        raw = "From {{inh|en|enm|water}}, from {{inh|en|ang|wæter}}, from {{inh|en|gem-pro|*watōr}}."
+        raw = (
+            "From {{inh|en|enm|water}}, from {{inh|en|ang|wæter}}, from {{inh|en|gem-pro|*watōr}}."
+        )
         templates = adapter._extract_etymology_templates(raw)
 
         assert len(templates) == 3
@@ -526,6 +526,7 @@ From {{bor|en|nl|bak}}.
     def test_extract_borrowing_template(self):
         """Borrowing templates are extracted."""
         from src.adapters.wiktionary import WiktionaryAdapter
+
         adapter = WiktionaryAdapter()
 
         raw = "{{bor|en|fr|justice}}, from {{der|en|la|iustitia}}."
@@ -540,6 +541,7 @@ From {{bor|en|nl|bak}}.
     def test_extract_cognate_template(self):
         """Cognate templates are extracted."""
         from src.adapters.wiktionary import WiktionaryAdapter
+
         adapter = WiktionaryAdapter()
 
         raw = "Cognate with {{cog|de|Wasser}}, {{cog|nl|water}}."
@@ -553,6 +555,7 @@ From {{bor|en|nl|bak}}.
     def test_clean_wikitext(self):
         """Wikitext cleaning removes markup."""
         from src.adapters.wiktionary import WiktionaryAdapter
+
         adapter = WiktionaryAdapter()
 
         text = "From {{inh|en|ang|wæter}}, ''meaning'' [[water]]."
@@ -565,6 +568,7 @@ From {{bor|en|nl|bak}}.
     def test_parse_language_section_with_templates(self):
         """Full language section parsing preserves template data."""
         from src.adapters.wiktionary import WiktionaryAdapter
+
         adapter = WiktionaryAdapter()
 
         content = """===Etymology===
@@ -599,10 +603,12 @@ class TestCLILogic:
     def test_validator_from_cli_context(self):
         """Validator works with CLI-style dict input."""
         validator = Validator()
-        report = validator.run_all({
-            "form_orthographic": "water",
-            "language_code": "eng",
-            "definition_primary": "a clear liquid",
-            "source_databases": ["cli-test"],
-        })
+        report = validator.run_all(
+            {
+                "form_orthographic": "water",
+                "language_code": "eng",
+                "definition_primary": "a clear liquid",
+                "source_databases": ["cli-test"],
+            }
+        )
         assert report.result in (ValidationResult.PASS, ValidationResult.WARN)

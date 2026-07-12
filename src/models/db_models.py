@@ -5,7 +5,6 @@ complementing the Neo4j graph database for LSR relationships.
 """
 
 from datetime import datetime
-from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -169,7 +168,9 @@ class EntityResolutionLog(Base):
 
     # Resolution details
     source_entry_id = Column(String(500), nullable=False)
-    action = Column(String(50), nullable=False)  # auto_merge, merge_with_flag, flag_for_review, create_new
+    action = Column(
+        String(50), nullable=False
+    )  # auto_merge, merge_with_flag, flag_for_review, create_new
     similarity_score = Column(Float)
     feature_scores = Column(JSONB)
 

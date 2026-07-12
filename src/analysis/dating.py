@@ -3,7 +3,7 @@
 import logging
 import re
 from dataclasses import dataclass, field
-from statistics import mean, median, stdev
+from statistics import median
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -33,16 +33,99 @@ class AnachronismAnalysis:
 
 # Common words to skip during analysis (high-frequency words with little dating value)
 STOP_WORDS = {
-    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
-    "being", "have", "has", "had", "do", "does", "did", "will", "would",
-    "could", "should", "may", "might", "must", "shall", "can", "need",
-    "this", "that", "these", "those", "it", "its", "he", "she", "they",
-    "we", "you", "i", "me", "him", "her", "us", "them", "my", "your",
-    "his", "their", "our", "who", "what", "which", "when", "where", "how",
-    "all", "each", "every", "both", "few", "more", "most", "other", "some",
-    "such", "no", "not", "only", "same", "so", "than", "too", "very",
-    "just", "also", "now", "here", "there", "then", "if", "as", "because",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "of",
+    "with",
+    "by",
+    "from",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "will",
+    "would",
+    "could",
+    "should",
+    "may",
+    "might",
+    "must",
+    "shall",
+    "can",
+    "need",
+    "this",
+    "that",
+    "these",
+    "those",
+    "it",
+    "its",
+    "he",
+    "she",
+    "they",
+    "we",
+    "you",
+    "i",
+    "me",
+    "him",
+    "her",
+    "us",
+    "them",
+    "my",
+    "your",
+    "his",
+    "their",
+    "our",
+    "who",
+    "what",
+    "which",
+    "when",
+    "where",
+    "how",
+    "all",
+    "each",
+    "every",
+    "both",
+    "few",
+    "more",
+    "most",
+    "other",
+    "some",
+    "such",
+    "no",
+    "not",
+    "only",
+    "same",
+    "so",
+    "than",
+    "too",
+    "very",
+    "just",
+    "also",
+    "now",
+    "here",
+    "there",
+    "then",
+    "if",
+    "as",
+    "because",
 }
 
 
@@ -110,10 +193,7 @@ class TextDating:
         normalized_tokens = [self._normalize(t) for t in tokens]
 
         # Filter out stop words and short tokens
-        content_tokens = [
-            t for t in normalized_tokens
-            if t not in STOP_WORDS and len(t) > 2
-        ]
+        content_tokens = [t for t in normalized_tokens if t not in STOP_WORDS and len(t) > 2]
 
         if not content_tokens:
             return DateAnalysis(
@@ -142,13 +222,15 @@ class TextDating:
                     # Check if this is a diagnostic word (narrow date range)
                     span = date_end - date_start
                     if span < 200:  # Less than 200 years span
-                        diagnostic_words.append({
-                            "word": token,
-                            "date_start": date_start,
-                            "date_end": date_end,
-                            "span": span,
-                            "diagnostic_value": max(0.0, 1.0 - span / 200),
-                        })
+                        diagnostic_words.append(
+                            {
+                                "word": token,
+                                "date_start": date_start,
+                                "date_end": date_end,
+                                "span": span,
+                                "diagnostic_value": max(0.0, 1.0 - span / 200),
+                            }
+                        )
 
         if not date_ranges:
             return DateAnalysis(
@@ -201,10 +283,7 @@ class TextDating:
         normalized_tokens = [self._normalize(t) for t in tokens]
 
         # Filter out stop words
-        content_tokens = [
-            t for t in normalized_tokens
-            if t not in STOP_WORDS and len(t) > 2
-        ]
+        content_tokens = [t for t in normalized_tokens if t not in STOP_WORDS and len(t) > 2]
 
         anachronisms: list[dict] = []
         suspicious_count = 0
@@ -221,13 +300,15 @@ class TextDating:
                     gap = date_start - claimed_date
                     severity = "high" if gap > 100 else "medium" if gap > 50 else "low"
 
-                    anachronisms.append({
-                        "word": token,
-                        "earliest_attestation": date_start,
-                        "claimed_date": claimed_date,
-                        "gap_years": gap,
-                        "severity": severity,
-                    })
+                    anachronisms.append(
+                        {
+                            "word": token,
+                            "earliest_attestation": date_start,
+                            "claimed_date": claimed_date,
+                            "gap_years": gap,
+                            "severity": severity,
+                        }
+                    )
 
                     if severity in ("high", "medium"):
                         suspicious_count += 1
@@ -286,9 +367,7 @@ class TextDating:
         """
         return token.lower()
 
-    def _calculate_date_range(
-        self, date_ranges: list[tuple[int, int]]
-    ) -> tuple[int, int]:
+    def _calculate_date_range(self, date_ranges: list[tuple[int, int]]) -> tuple[int, int]:
         """
         Calculate the most likely date range from multiple word attestations.
 

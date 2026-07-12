@@ -1,11 +1,10 @@
 """Input validation and sanitization utilities."""
 
-import html
 import re
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
-
 
 # =============================================================================
 # Sanitization Functions
@@ -121,7 +120,7 @@ def sanitize_year(value: Any) -> int | None:
 
 
 def sanitize_list(
-    values: list[Any], sanitizer: callable = sanitize_string, max_items: int = 100
+    values: list[Any], sanitizer: Callable[[str], str] = sanitize_string, max_items: int = 100
 ) -> list[Any]:
     """
     Sanitize a list of values.
@@ -195,11 +194,7 @@ def is_safe_string(value: str) -> bool:
     ]
 
     value_lower = value.lower()
-    for pattern in dangerous_patterns:
-        if re.search(pattern, value_lower):
-            return False
-
-    return True
+    return all(not re.search(pattern, value_lower) for pattern in dangerous_patterns)
 
 
 # =============================================================================
@@ -211,7 +206,7 @@ class SanitizedString(str):
     """A string type that is automatically sanitized."""
 
     @classmethod
-    def __get_validators__(cls):
+    def __get_validators__(cls) -> Iterator[Callable[[Any], str]]:
         yield cls.validate
 
     @classmethod
@@ -225,7 +220,7 @@ class ISOLanguageCode(str):
     """A validated ISO 639-3 language code."""
 
     @classmethod
-    def __get_validators__(cls):
+    def __get_validators__(cls) -> Iterator[Callable[[Any], str]]:
         yield cls.validate
 
     @classmethod
@@ -233,11 +228,11 @@ class ISOLanguageCode(str):
         if not isinstance(v, str):
             raise ValueError("Language code must be a string")
 
-        v = sanitize_iso_code(v)
-        if not is_valid_iso639_3(v):
-            raise ValueError(f"Invalid ISO 639-3 language code: {v}")
+        code = sanitize_iso_code(v)
+        if not is_valid_iso639_3(code):
+            raise ValueError(f"Invalid ISO 639-3 language code: {code}")
 
-        return v
+        return code
 
 
 # =============================================================================
@@ -373,8 +368,13 @@ class GraphQueryRequest(BaseModel):
 
         # Allowlist: query must start with a read-only clause
         allowed_starts = (
-            "MATCH", "RETURN", "WITH", "OPTIONAL MATCH",
-            "UNWIND", "EXPLAIN", "PROFILE",
+            "MATCH",
+            "RETURN",
+            "WITH",
+            "OPTIONAL MATCH",
+            "UNWIND",
+            "EXPLAIN",
+            "PROFILE",
         )
         if not any(v_upper.startswith(prefix) for prefix in allowed_starts):
             raise ValueError(
@@ -399,7 +399,5 @@ class GraphQueryRequest(BaseModel):
         ]
         for pattern in dangerous:
             if pattern in v_upper:
-                raise ValueError(
-                    f"Query contains disallowed operation: {pattern.strip()}"
-                )
+                raise ValueError(f"Query contains disallowed operation: {pattern.strip()}")
         return v
