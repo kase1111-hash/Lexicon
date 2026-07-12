@@ -40,7 +40,7 @@ def make_cache_key(prefix: str, *args: Any, **kwargs: Any) -> str:
     key_str = json.dumps(key_data, sort_keys=True)
 
     # Hash for consistent length
-    key_hash = hashlib.md5(key_str.encode()).hexdigest()[:16]
+    key_hash = hashlib.md5(key_str.encode(), usedforsecurity=False).hexdigest()[:16]
 
     return f"lexicon:{prefix}:{key_hash}"
 

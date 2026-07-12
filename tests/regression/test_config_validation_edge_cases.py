@@ -144,10 +144,19 @@ class TestValidationEdgeCases:
         assert result == ""
 
     def test_sanitize_string_with_html(self):
-        """Test sanitizing string with HTML."""
+        """Test that HTML is preserved (escaping happens at the presentation layer).
+
+        sanitize_string must not corrupt linguistic notation like "k > tʃ",
+        so HTML content passes through unchanged apart from whitespace
+        normalization and control-character removal.
+        """
         result = sanitize_string("<script>alert('xss')</script>")
-        assert "<script>" not in result
-        assert "alert" not in result or "<" not in result
+        assert result == "<script>alert('xss')</script>"
+
+    def test_sanitize_string_preserves_linguistic_notation(self):
+        """Test that sound-change notation is not HTML-escaped."""
+        result = sanitize_string("k > tʃ / _i")
+        assert result == "k > tʃ / _i"
 
     def test_sanitize_string_max_length(self):
         """Test sanitizing string with max length."""

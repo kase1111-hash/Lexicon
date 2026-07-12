@@ -27,7 +27,7 @@ KNOWN_LANGUAGE_CODES = {
 class ValidationResult(str, Enum):
     """Possible validation outcomes."""
 
-    PASS = "pass"
+    PASS = "pass"  # nosec B105 - enum value, not a password
     WARN = "warn"
     FAIL = "fail"
     REJECT = "reject"

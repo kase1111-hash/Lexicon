@@ -36,37 +36,6 @@ async def get_lsr_repository() -> LSRRepository:
     return LSRRepository(db)
 
 
-@router.get(
-    "/{lsr_id}",
-    responses={404: {"model": ErrorResponse}},
-)
-async def get_lsr(
-    lsr_id: UUID,
-    repo: LSRRepository = Depends(get_lsr_repository),
-) -> dict:
-    """
-    Get a full LSR record by ID.
-
-    Returns the complete Lexical State Record including all fields,
-    attestations, and relationship IDs.
-    """
-    # Check cache first
-    cache = await get_cache()
-    cache_key = make_cache_key("lsr", str(lsr_id))
-    cached = await cache.get(cache_key)
-    if cached:
-        logger.debug(f"Cache hit for LSR: {lsr_id}")
-        return cached
-
-    logger.info(f"Fetching LSR: {lsr_id}")
-    lsr = await repo.get_by_id(lsr_id)
-    result = {"data": lsr.model_dump(mode="json")}
-
-    # Cache the result
-    await cache.set(cache_key, result, LSR_CACHE_TTL)
-    return result
-
-
 @router.get("/search")
 async def search_lsr(
     form: str | None = Query(None, description="Form to search (exact or fuzzy)", max_length=200),
@@ -151,6 +120,37 @@ async def search_lsr(
     # Cache the result
     await cache.set(cache_key, response, SEARCH_CACHE_TTL)
     return response
+
+
+@router.get(
+    "/{lsr_id}",
+    responses={404: {"model": ErrorResponse}},
+)
+async def get_lsr(
+    lsr_id: UUID,
+    repo: LSRRepository = Depends(get_lsr_repository),
+) -> dict:
+    """
+    Get a full LSR record by ID.
+
+    Returns the complete Lexical State Record including all fields,
+    attestations, and relationship IDs.
+    """
+    # Check cache first
+    cache = await get_cache()
+    cache_key = make_cache_key("lsr", str(lsr_id))
+    cached = await cache.get(cache_key)
+    if cached:
+        logger.debug(f"Cache hit for LSR: {lsr_id}")
+        return cached
+
+    logger.info(f"Fetching LSR: {lsr_id}")
+    lsr = await repo.get_by_id(lsr_id)
+    result = {"data": lsr.model_dump(mode="json")}
+
+    # Cache the result
+    await cache.set(cache_key, result, LSR_CACHE_TTL)
+    return result
 
 
 @router.post(

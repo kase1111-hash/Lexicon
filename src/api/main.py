@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import ValidationError as PydanticValidationError
 
 from src.config import get_settings, is_production
@@ -414,15 +414,13 @@ async def health() -> dict:
     return health_status
 
 
-@app.get("/metrics", tags=["Monitoring"])
-async def get_metrics() -> "PlainTextResponse":
+@app.get("/metrics", tags=["Monitoring"], response_class=PlainTextResponse)
+async def get_metrics() -> PlainTextResponse:
     """
     Prometheus-compatible metrics endpoint.
 
     Returns operational metrics in Prometheus text format.
     """
-    from fastapi.responses import PlainTextResponse
-
     from src.utils.metrics import metrics
 
     return PlainTextResponse(

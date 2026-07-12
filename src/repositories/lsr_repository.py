@@ -503,6 +503,7 @@ class LSRRepository:
         language: str | None = None,
         date_start: int | None = None,
         date_end: int | None = None,
+        semantic_field: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[LSR], int]:
@@ -517,6 +518,7 @@ class LSRRepository:
             language: Optional ISO 639-3 language code.
             date_start: Optional start year for date range.
             date_end: Optional end year for date range.
+            semantic_field: Optional WordNet synset ID to filter by.
             limit: Maximum number of results to return.
             offset: Number of results to skip.
 
@@ -532,6 +534,7 @@ class LSRRepository:
                 return await self._search_elasticsearch(
                     form=form, language=language,
                     date_start=date_start, date_end=date_end,
+                    semantic_field=semantic_field,
                     limit=limit, offset=offset,
                 )
             except Exception as e:
@@ -541,6 +544,7 @@ class LSRRepository:
         return await self._search_neo4j(
             form=form, language=language,
             date_start=date_start, date_end=date_end,
+            semantic_field=semantic_field,
             limit=limit, offset=offset,
         )
 
@@ -550,6 +554,7 @@ class LSRRepository:
         language: str | None = None,
         date_start: int | None = None,
         date_end: int | None = None,
+        semantic_field: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[LSR], int]:
@@ -575,6 +580,10 @@ class LSRRepository:
         if date_end is not None:
             where_clauses.append("(l.date_end IS NULL OR l.date_end <= $date_end)")
             params["date_end"] = date_end
+
+        if semantic_field:
+            where_clauses.append("$semantic_field IN l.semantic_fields")
+            params["semantic_field"] = semantic_field
 
         where_clause = " AND ".join(where_clauses) if where_clauses else "TRUE"
 
@@ -616,6 +625,7 @@ class LSRRepository:
         language: str | None = None,
         date_start: int | None = None,
         date_end: int | None = None,
+        semantic_field: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[LSR], int]:
@@ -648,6 +658,9 @@ class LSRRepository:
             filter_clauses.append(
                 {"range": {"date_end": {"lte": date_end}}}
             )
+
+        if semantic_field:
+            filter_clauses.append({"term": {"semantic_fields": semantic_field}})
 
         body: dict[str, Any] = {
             "query": {

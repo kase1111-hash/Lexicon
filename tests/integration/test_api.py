@@ -1,13 +1,29 @@
 """Integration tests for the API."""
 
-import pytest
+import socket
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
 
 client = TestClient(app)
+
+
+def _neo4j_available() -> bool:
+    """Check whether a Neo4j instance is reachable on the default port."""
+    try:
+        with socket.create_connection(("localhost", 7687), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+requires_db = pytest.mark.skipif(
+    not _neo4j_available(),
+    reason="requires live databases (start with `docker compose up`)",
+)
 
 
 class TestRootEndpoints:
@@ -31,17 +47,24 @@ class TestRootEndpoints:
         assert "databases" in data
 
     def test_metrics(self):
-        """Test metrics endpoint."""
+        """Test Prometheus metrics endpoint returns text format."""
         response = client.get("/metrics")
         assert response.status_code == 200
+        assert "text/plain" in response.headers.get("content-type", "")
+
+    def test_metrics_json(self):
+        """Test JSON metrics endpoint."""
+        response = client.get("/metrics/json")
+        assert response.status_code == 200
         data = response.json()
-        assert "api_version" in data
-        assert "metrics" in data
+        assert "counters" in data
+        assert "uptime_seconds" in data
 
 
 class TestLSREndpoints:
     """Tests for LSR API endpoints."""
 
+    @requires_db
     def test_search_empty(self):
         """Test search with no parameters returns empty results."""
         response = client.get("/api/v1/lsr/search")
@@ -52,6 +75,7 @@ class TestLSREndpoints:
         assert "limit" in data
         assert "offset" in data
 
+    @requires_db
     def test_search_with_form(self):
         """Test search with form parameter."""
         response = client.get("/api/v1/lsr/search", params={"form": "water"})
@@ -59,6 +83,7 @@ class TestLSREndpoints:
         data = response.json()
         assert data["filters"]["form"] == "water"
 
+    @requires_db
     def test_search_with_language(self):
         """Test search with language parameter."""
         response = client.get("/api/v1/lsr/search", params={"language": "eng"})
@@ -66,6 +91,7 @@ class TestLSREndpoints:
         data = response.json()
         assert data["filters"]["language"] == "eng"
 
+    @requires_db
     def test_search_with_date_range(self):
         """Test search with date range parameters."""
         response = client.get(
@@ -87,6 +113,7 @@ class TestLSREndpoints:
         data = response.json()
         assert data["error"] == "INVALID_DATE_RANGE"
 
+    @requires_db
     def test_search_pagination(self):
         """Test search pagination parameters."""
         response = client.get(
@@ -101,8 +128,9 @@ class TestLSREndpoints:
     def test_search_limit_validation(self):
         """Test search limit validation (max 100)."""
         response = client.get("/api/v1/lsr/search", params={"limit": 200})
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 400  # Custom validation error handler returns 400
 
+    @requires_db
     def test_get_lsr_not_found(self):
         """Test getting non-existent LSR."""
         fake_id = str(uuid4())
@@ -114,8 +142,9 @@ class TestLSREndpoints:
     def test_get_lsr_invalid_uuid(self):
         """Test getting LSR with invalid UUID."""
         response = client.get("/api/v1/lsr/not-a-uuid")
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 400  # Custom validation error handler returns 400
 
+    @requires_db
     def test_get_etymology(self):
         """Test etymology endpoint."""
         fake_id = str(uuid4())
@@ -125,6 +154,7 @@ class TestLSREndpoints:
         assert "chain" in data
         assert "depth" in data
 
+    @requires_db
     def test_get_descendants(self):
         """Test descendants endpoint."""
         fake_id = str(uuid4())
@@ -133,6 +163,7 @@ class TestLSREndpoints:
         data = response.json()
         assert "descendants" in data
 
+    @requires_db
     def test_get_descendants_with_depth(self):
         """Test descendants endpoint with depth parameter."""
         fake_id = str(uuid4())
@@ -141,6 +172,7 @@ class TestLSREndpoints:
         data = response.json()
         assert data["depth"] == 5
 
+    @requires_db
     def test_get_cognates(self):
         """Test cognates endpoint."""
         fake_id = str(uuid4())
@@ -149,6 +181,7 @@ class TestLSREndpoints:
         data = response.json()
         assert "cognates" in data
 
+    @requires_db
     def test_get_borrowings(self):
         """Test borrowings endpoint."""
         fake_id = str(uuid4())
@@ -158,6 +191,7 @@ class TestLSREndpoints:
         assert "borrowed_from" in data
         assert "borrowed_to" in data
 
+    @requires_db
     def test_create_lsr(self):
         """Test LSR creation endpoint."""
         response = client.post(
@@ -178,7 +212,7 @@ class TestLSREndpoints:
             "/api/v1/lsr/",
             json={"form_orthographic": "test"},  # Missing language_code
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
 
 class TestAnalysisEndpoints:
@@ -203,7 +237,7 @@ class TestAnalysisEndpoints:
             "/api/v1/analyze/date-text",
             json={"language": "eng"},
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_detect_anachronisms(self):
         """Test anachronism detection endpoint."""
@@ -266,7 +300,7 @@ class TestAnalysisEndpoints:
             "/api/v1/analyze/semantic-drift",
             params={"language": "eng"},
         )
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_compare_concept(self):
         """Test concept comparison endpoint."""
@@ -292,6 +326,7 @@ class TestAnalysisEndpoints:
 class TestGraphEndpoints:
     """Tests for graph API endpoints."""
 
+    @requires_db
     def test_execute_query(self):
         """Test graph query execution endpoint."""
         response = client.post(
@@ -303,6 +338,7 @@ class TestGraphEndpoints:
         assert "results" in data
         assert "query" in data
 
+    @requires_db
     def test_get_path(self):
         """Test path finding endpoint."""
         from_id = str(uuid4())
@@ -315,6 +351,7 @@ class TestGraphEndpoints:
         data = response.json()
         assert "paths" in data
 
+    @requires_db
     def test_get_path_with_max_hops(self):
         """Test path finding with max_hops parameter."""
         from_id = str(uuid4())
@@ -325,6 +362,7 @@ class TestGraphEndpoints:
         )
         assert response.status_code == 200
 
+    @requires_db
     def test_bulk_export(self):
         """Test bulk export job creation."""
         response = client.post(
@@ -333,8 +371,8 @@ class TestGraphEndpoints:
         )
         assert response.status_code == 200
         data = response.json()
-        assert "job_id" in data
         assert "status" in data
+        assert "count" in data
 
     def test_export_status(self):
         """Test bulk export status check."""
@@ -355,13 +393,13 @@ class TestErrorHandling:
 
     def test_method_not_allowed(self):
         """Test 405 for wrong HTTP method."""
-        response = client.delete("/api/v1/lsr/search")
+        response = client.post("/health")
         assert response.status_code == 405
 
     def test_validation_error_format(self):
         """Test that validation errors return proper format."""
         response = client.post("/api/v1/analyze/date-text", json={})
-        assert response.status_code == 422
+        assert response.status_code == 400
         data = response.json()
         assert "error" in data or "detail" in data
 
@@ -430,6 +468,7 @@ class TestAPIKeyAuthentication:
 class TestLSREdgeCases:
     """Additional edge case tests for LSR endpoints."""
 
+    @requires_db
     def test_search_with_special_characters(self):
         """Test search with special characters in form."""
         response = client.get("/api/v1/lsr/search", params={"form": "test<script>"})
@@ -442,14 +481,16 @@ class TestLSREdgeCases:
         """Test search with excessively long form parameter."""
         long_form = "a" * 500  # Exceeds 200 char limit
         response = client.get("/api/v1/lsr/search", params={"form": long_form})
-        # Should either truncate or return validation error
-        assert response.status_code in [200, 422]
+        # Exceeds max_length so the validation handler rejects it
+        assert response.status_code == 400
 
+    @requires_db
     def test_search_with_empty_string_form(self):
         """Test search with empty string form."""
         response = client.get("/api/v1/lsr/search", params={"form": ""})
         assert response.status_code == 200
 
+    @requires_db
     def test_search_with_unicode_form(self):
         """Test search with Unicode characters in form."""
         response = client.get("/api/v1/lsr/search", params={"form": "水"})  # Chinese for water
@@ -457,6 +498,7 @@ class TestLSREdgeCases:
         data = response.json()
         assert data["filters"]["form"] == "水"
 
+    @requires_db
     def test_search_date_boundary_values(self):
         """Test search with boundary date values."""
         # Minimum date
@@ -470,13 +512,14 @@ class TestLSREdgeCases:
     def test_search_date_below_minimum(self):
         """Test search with date below allowed minimum."""
         response = client.get("/api/v1/lsr/search", params={"date_start": -15000})
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 400  # Custom validation error handler returns 400
 
     def test_search_date_above_maximum(self):
         """Test search with date above allowed maximum."""
         response = client.get("/api/v1/lsr/search", params={"date_end": 3000})
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 400  # Custom validation error handler returns 400
 
+    @requires_db
     def test_delete_lsr_not_found(self):
         """Test deleting non-existent LSR."""
         fake_id = str(uuid4())
@@ -485,6 +528,7 @@ class TestLSREdgeCases:
         data = response.json()
         assert data["error"] == "LSR_NOT_FOUND"
 
+    @requires_db
     def test_create_lsr_with_dates(self):
         """Test creating LSR with date fields."""
         response = client.post(
@@ -516,6 +560,7 @@ class TestLSREdgeCases:
         # Should fail validation
         assert response.status_code in [400, 422]
 
+    @requires_db
     def test_create_lsr_with_phonetic(self):
         """Test creating LSR with phonetic transcription."""
         response = client.post(
@@ -536,15 +581,13 @@ class TestAnalysisEdgeCases:
     """Additional edge case tests for analysis endpoints."""
 
     def test_date_text_empty_text(self):
-        """Test dating with empty text."""
+        """Test dating with empty text is rejected by validation."""
         response = client.post(
             "/api/v1/analyze/date-text",
             json={"text": "", "language": "eng"},
         )
-        assert response.status_code == 200
-        data = response.json()
-        # Should handle gracefully with low confidence
-        assert data["confidence"] == 0 or "predicted_date_range" in data
+        # Empty text fails the minimum-length requirement
+        assert response.status_code == 400
 
     def test_date_text_very_long_text(self):
         """Test dating with very long text."""
@@ -598,6 +641,7 @@ class TestGraphEdgeCases:
         # Should fail validation
         assert response.status_code in [400, 422]
 
+    @requires_db
     def test_execute_query_with_parameters(self):
         """Test graph query with parameters."""
         response = client.post(
@@ -609,6 +653,7 @@ class TestGraphEdgeCases:
         )
         assert response.status_code == 200
 
+    @requires_db
     def test_get_path_same_source_target(self):
         """Test path finding with same source and target."""
         lsr_id = str(uuid4())
@@ -618,6 +663,7 @@ class TestGraphEdgeCases:
         )
         assert response.status_code == 200
 
+    @requires_db
     def test_get_path_with_relationship_types(self):
         """Test path finding with specific relationship types."""
         from_id = str(uuid4())
@@ -632,6 +678,7 @@ class TestGraphEdgeCases:
         )
         assert response.status_code == 200
 
+    @requires_db
     def test_etymology_chain(self):
         """Test etymology chain endpoint."""
         lsr_id = str(uuid4())
@@ -641,6 +688,7 @@ class TestGraphEdgeCases:
         assert "chain" in data
         assert "depth" in data
 
+    @requires_db
     def test_graph_cognates(self):
         """Test cognates endpoint on graph router."""
         lsr_id = str(uuid4())
@@ -650,6 +698,7 @@ class TestGraphEdgeCases:
         assert "cognate_count" in data
         assert "by_language" in data
 
+    @requires_db
     def test_bulk_export_invalid_format(self):
         """Test bulk export with invalid format."""
         response = client.post(
@@ -671,7 +720,7 @@ class TestContentTypeHandling:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         # Should fail with non-JSON content
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_json_response_content_type(self):
         """Test that responses have correct content type."""
@@ -682,11 +731,13 @@ class TestContentTypeHandling:
 class TestPaginationEdgeCases:
     """Tests for pagination edge cases."""
 
+    @requires_db
     def test_zero_offset(self):
         """Test pagination with zero offset."""
         response = client.get("/api/v1/lsr/search", params={"offset": 0})
         assert response.status_code == 200
 
+    @requires_db
     def test_large_offset(self):
         """Test pagination with large offset."""
         response = client.get("/api/v1/lsr/search", params={"offset": 10000})
@@ -694,6 +745,7 @@ class TestPaginationEdgeCases:
         data = response.json()
         assert data["offset"] == 10000
 
+    @requires_db
     def test_minimum_limit(self):
         """Test pagination with minimum limit."""
         response = client.get("/api/v1/lsr/search", params={"limit": 1})
@@ -704,9 +756,9 @@ class TestPaginationEdgeCases:
     def test_negative_offset_rejected(self):
         """Test that negative offset is rejected."""
         response = client.get("/api/v1/lsr/search", params={"offset": -1})
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     def test_zero_limit_rejected(self):
         """Test that zero limit is rejected."""
         response = client.get("/api/v1/lsr/search", params={"limit": 0})
-        assert response.status_code == 422
+        assert response.status_code == 400

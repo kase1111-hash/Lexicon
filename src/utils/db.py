@@ -87,6 +87,12 @@ class DatabaseManager:
             msg = str(e)
             logger.error(f"Failed to connect to Neo4j: {msg}")
             self._connection_errors["neo4j"] = msg
+            if self._neo4j_driver:
+                try:
+                    await self._neo4j_driver.close()
+                except Exception as close_error:
+                    logger.debug(f"Error closing failed Neo4j driver: {close_error}")
+                self._neo4j_driver = None
             return False
 
     async def connect_postgres(self) -> bool:
@@ -139,6 +145,12 @@ class DatabaseManager:
             msg = str(e)
             logger.error(f"Failed to connect to Elasticsearch: {msg}")
             self._connection_errors["elasticsearch"] = msg
+            if self._elasticsearch_client:
+                try:
+                    await self._elasticsearch_client.close()
+                except Exception as close_error:
+                    logger.debug(f"Error closing failed Elasticsearch client: {close_error}")
+                self._elasticsearch_client = None
             return False
 
     async def connect_redis(self) -> bool:
@@ -164,6 +176,12 @@ class DatabaseManager:
             msg = str(e)
             logger.error(f"Failed to connect to Redis: {msg}")
             self._connection_errors["redis"] = msg
+            if self._redis_client:
+                try:
+                    await self._redis_client.aclose()
+                except Exception as close_error:
+                    logger.debug(f"Error closing failed Redis client: {close_error}")
+                self._redis_client = None
             return False
 
     async def close_all(self) -> None:

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from src.exceptions import DatabaseError, LSRNotFoundError, ValidationError
 from src.utils.db import DatabaseManager, get_db
-from src.utils.validation import GraphQueryRequest, validate_graph_query
+from src.utils.validation import GraphQueryRequest
 
 logger = logging.getLogger(__name__)
 
