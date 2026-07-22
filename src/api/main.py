@@ -70,8 +70,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
     logger.info("Starting Linguistic Stratigraphy API")
     try:
-        await get_db()
-        logger.info("Database connections established")
+        db = await get_db()
+        status = db.get_connection_status()
+        unavailable = sorted(name for name, info in status.items() if not info["connected"])
+        if unavailable:
+            logger.warning(
+                f"API starting with degraded database availability; "
+                f"unavailable: {', '.join(unavailable)}"
+            )
+        else:
+            logger.info("Database connections established")
     except Exception as e:
         logger.warning(f"Could not connect to all databases: {e}")
 

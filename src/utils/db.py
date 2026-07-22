@@ -53,12 +53,22 @@ class DatabaseManager:
 
     async def connect_all(self) -> None:
         """Connect to all database systems."""
-        await self.connect_neo4j()
-        await self.connect_postgres()
-        await self.connect_elasticsearch()
-        await self.connect_redis()
+        results = {
+            "neo4j": await self.connect_neo4j(),
+            "postgres": await self.connect_postgres(),
+            "elasticsearch": await self.connect_elasticsearch(),
+            "redis": await self.connect_redis(),
+        }
         self._connected = True
-        logger.info("Connected to all databases")
+        failed = sorted(name for name, ok in results.items() if not ok)
+        if not failed:
+            logger.info("Connected to all databases")
+        else:
+            connected = sorted(name for name, ok in results.items() if ok)
+            logger.warning(
+                f"Connected to {', '.join(connected) or 'no databases'}; "
+                f"unavailable: {', '.join(failed)}"
+            )
 
     async def connect_neo4j(self) -> bool:
         """Connect to Neo4j graph database.

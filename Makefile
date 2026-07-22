@@ -139,7 +139,16 @@ db-init:
 	./scripts/setup_databases.sh
 
 db-migrate:
-	@echo "Database migrations not yet implemented"
+	alembic upgrade head
+
+db-migrate-down:
+	alembic downgrade -1
+
+db-revision:
+	alembic revision --autogenerate -m "$(MSG)"
+
+db-migrate-history:
+	alembic history --verbose
 
 # =============================================================================
 # API Commands
