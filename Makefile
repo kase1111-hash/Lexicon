@@ -165,10 +165,10 @@ run-api-prod:
 # =============================================================================
 
 ingest-wiktionary:
-	python -m src.adapters.wiktionary
+	python -m src.ingestion --source wiktionary --words data/seed_words_eng.txt
 
 ingest-clld:
-	python -m src.adapters.clld
+	python -m src.ingestion --source wold
 
 # =============================================================================
 # Build & Release Commands

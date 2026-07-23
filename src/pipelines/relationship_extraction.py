@@ -6,6 +6,7 @@ relationships. Works with both clean text and raw Wiktionary template data.
 
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
@@ -160,7 +161,7 @@ class RelationshipExtractor:
         # Resolve against LSR store to get full ExtractedRelationship objects
     """
 
-    def __init__(self, lsr_store: dict[UUID, object] | None = None):
+    def __init__(self, lsr_store: Mapping[UUID, object] | None = None):
         """Initialize with optional LSR store for UUID resolution.
 
         Args:
@@ -172,7 +173,7 @@ class RelationshipExtractor:
         if lsr_store:
             self._build_index()
 
-    def set_lsr_store(self, store: dict[UUID, object]) -> None:
+    def set_lsr_store(self, store: Mapping[UUID, object]) -> None:
         """Set the LSR store and rebuild the form index."""
         self._lsr_store = store
         self._build_index()

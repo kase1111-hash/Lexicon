@@ -32,7 +32,7 @@ logger = logging.getLogger("lexicon")
 def cmd_ingest(args: argparse.Namespace) -> None:
     """Run the ingestion pipeline."""
     # Import here to avoid circular deps and heavy imports at startup
-    from scripts.ingest import load_word_list, run_ingestion, run_wold_ingestion
+    from src.ingestion import load_word_list, run_ingestion, run_wold_ingestion
 
     if args.source == "wold":
         languages = args.language.split(",") if args.language else None
