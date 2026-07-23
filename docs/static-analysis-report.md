@@ -1,5 +1,9 @@
 # Static Analysis Report
 
+> **HISTORICAL SNAPSHOT (2026-01-11).** Point-in-time report. Current
+> status: `make lint`, `make format-check`, `make type-check`, and
+> `make security-check` all pass clean — run them for up-to-date results.
+
 Generated: 2026-01-11
 
 ## Tools Used

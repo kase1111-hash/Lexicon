@@ -306,9 +306,23 @@ Content-Type: application/json
 {
   "language": "eng",
   "format": "json",
-  "include_relationships": true
+  "include_relationships": true,
+  "run_async": false
 }
 ```
+
+`format` is `json` or `csv`. With `run_async: false` (default) the export
+payload is returned directly. With `run_async: true` the response contains
+a `job_id` plus `status_url`/`result_url` for the background job:
+
+```http
+GET /api/v1/graph/bulk/status/{job_id}
+GET /api/v1/graph/bulk/result/{job_id}
+```
+
+Job status is one of `pending`, `running`, `completed`, or `failed`;
+completed jobs expose a `download_url` and expire an hour after
+completion.
 
 ### Monitoring
 

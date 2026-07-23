@@ -112,7 +112,32 @@ Get etymology chain via graph traversal.
 Get cognates via graph traversal.
 
 #### POST /api/v1/graph/bulk/export
-Export LSR data for a language.
+Export LSR data (and optionally relationships) for a language.
+
+**Request:**
+```json
+{
+  "language": "eng",
+  "format": "json",
+  "include_relationships": true,
+  "run_async": false
+}
+```
+
+- `format`: `json` (items + relationships) or `csv` (CSV string in `csv`)
+- `run_async: false` (default): the export runs inline and the payload is
+  returned directly
+- `run_async: true`: a background job is created; the response contains
+  `job_id`, `status_url`, and `result_url`
+
+#### GET /api/v1/graph/bulk/status/{job_id}
+Get the status of a bulk export job (`pending`, `running`, `completed`,
+`failed`), including duration and, once completed, a `download_url`.
+Finished jobs expire an hour after completion.
+
+#### GET /api/v1/graph/bulk/result/{job_id}
+Fetch the payload of a completed bulk export job. Returns 404 for unknown
+jobs and the job's error for failed ones.
 
 ## Rate Limits
 
@@ -120,6 +145,30 @@ Default: 100 requests per minute per API key (configurable via environment varia
 
 ## GraphQL
 
-The GraphQL endpoint is available at `/graphql`.
+The GraphQL endpoint is available at `/graphql`, with the GraphiQL
+playground served in the browser at the same path.
 
-See `src/api/graphql/schema.py` for the full schema definition. You can use the GraphQL playground at `/graphql` in the browser for interactive exploration.
+Root query fields:
+
+- `lsr(id)` — one record, including nested `ancestors`, `descendants`,
+  and `cognates` graph traversals
+- `searchLsr(form, language, dateStart, dateEnd, limit, offset)`
+- `language(isoCode)` / `languages(family)`
+- `etymology(lsrId)` — full chain back to the proto-form
+- `semanticTrajectory(form, language)` — drift points and shift events
+- `dateText(text, language)` — text dating analysis
+- `detectAnachronisms(text, claimedDate, language)`
+
+Example:
+
+```graphql
+query {
+  searchLsr(form: "water", language: "eng") {
+    form
+    language { name }
+    cognates { form language { name } }
+  }
+}
+```
+
+See `src/api/graphql/schema.py` for the full schema definition.

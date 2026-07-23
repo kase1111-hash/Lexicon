@@ -1,5 +1,11 @@
 # Agentic Security Audit — Linguistic Stratigraphy (Lexicon)
 
+> **HISTORICAL SNAPSHOT (2026-03-11, commit 864cacc).** Point-in-time
+> audit; the codebase has changed substantially since (security findings
+> were addressed in later commits — see git history). References to
+> infrastructure that was later removed (e.g. AWS Secrets Manager in the
+> compose file) no longer apply.
+
 ## AUDIT METADATA
 
 ```

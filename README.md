@@ -115,6 +115,30 @@ query {
 }
 ```
 
+### Data Ingestion
+
+Populate the graph from any of the four supported sources:
+
+```bash
+# Wiktionary (word list or single word)
+python -m src.ingestion --source wiktionary --words data/seed_words_eng.txt
+python -m src.ingestion --source wiktionary --word water --language English
+
+# WOLD loanword data (CSV files download on first run)
+python -m src.ingestion --source wold --borrowings-only
+
+# CLICS colexifications from CLDF wordlist data
+python -m src.ingestion --source clics --colexified-only
+
+# Local historical corpus (dated .txt documents, see src/adapters/corpus.py)
+python -m src.ingestion --source corpus --corpus-dir data/corpus
+```
+
+Add `--dry-run` to fetch and resolve without persisting. The same
+pipeline is available via `make ingest-wiktionary`, `make ingest-clld`,
+`make ingest-clics`, and `make ingest-corpus`, or the `lexicon ingest`
+CLI subcommand.
+
 ### Python Client
 
 ```python
@@ -284,6 +308,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Wiktionary](https://www.wiktionary.org/) for etymological data
 - [CLLD/CLICS](https://clics.clld.org/) for cross-linguistic data
 - [Hamilton et al. (2016)](https://arxiv.org/abs/1605.09096) for diachronic embedding methodology
+
+> **Note on embeddings:** semantic vectors are currently produced by a
+> lightweight deterministic hashed n-gram encoder
+> (`src/pipelines/embedding.py`) rather than trained transformer models.
+> It provides real cosine-similarity structure for drift analysis and is
+> designed to be swapped for a sentence-transformer without changing
+> callers.
 
 ## Citation
 

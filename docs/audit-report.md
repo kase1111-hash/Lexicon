@@ -1,5 +1,11 @@
 # Software Audit Report: Lexicon (Computational Linguistic Stratigraphy)
 
+> **HISTORICAL SNAPSHOT (2026-01-27).** This audit predates the refocus
+> and subsequent feature work. Findings that reference Milvus, Airflow,
+> Kubernetes, `src/training/`, or unimplemented adapters/GraphQL describe
+> code that has since been deleted or implemented. Kept for historical
+> context; see CHANGELOG.md for the current state.
+
 **Audit Date:** 2026-01-27
 **Version Reviewed:** 0.1.0 (Alpha)
 **Auditor:** Claude Code
