@@ -24,6 +24,8 @@ from src.ingestion import (  # noqa: E402,F401
     _process_entry,
     load_word_list,
     main,
+    run_clics_ingestion,
+    run_corpus_ingestion,
     run_ingestion,
     run_wold_ingestion,
 )

@@ -9,7 +9,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import ValidationError as PydanticValidationError
+from strawberry.fastapi import GraphQLRouter
 
+from src.api.graphql import schema as graphql_schema
 from src.config import get_settings, is_production
 from src.exceptions import (
     AnalysisError,
@@ -375,6 +377,21 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 app.include_router(lsr.router, prefix="/api/v1/lsr", tags=["LSR"])
 app.include_router(analysis.router, prefix="/api/v1/analyze", tags=["Analysis"])
 app.include_router(graph.router, prefix="/api/v1/graph", tags=["Graph"])
+
+
+# GraphQL endpoint (with GraphiQL playground on GET)
+async def _graphql_context() -> dict[str, Any]:
+    return {"db": await get_db()}
+
+
+graphql_router: GraphQLRouter[dict[str, Any], None] = GraphQLRouter(
+    graphql_schema,
+    # Strawberry awaits async context getters at runtime; its stubs only
+    # admit sync callables
+    context_getter=_graphql_context,  # type: ignore[arg-type]
+    graphql_ide="graphiql",
+)
+app.include_router(graphql_router, prefix="/graphql", tags=["GraphQL"])
 
 
 @app.get("/", tags=["Root"])

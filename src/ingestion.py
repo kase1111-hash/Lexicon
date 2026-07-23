@@ -20,6 +20,7 @@ from uuid import UUID
 from src.adapters.base import RawLexicalEntry
 from src.adapters.wiktionary import WiktionaryAdapter
 from src.models.lsr import LSR
+from src.pipelines.embedding import EmbeddingPipeline
 from src.pipelines.entity_resolution import EntityResolver, ResolutionAction, convert_entry_to_lsr
 from src.pipelines.relationship_extraction import RelationshipExtractor
 from src.pipelines.validation import ValidationResult, Validator
@@ -30,6 +31,9 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("ingest")
+
+# Shared encoder for semantic vectors generated during ingestion
+_embedder = EmbeddingPipeline()
 
 
 class IngestionStats:
@@ -259,6 +263,110 @@ def run_wold_ingestion(
     return stats
 
 
+def _run_adapter_ingestion(
+    adapter: "object",
+    source_label: str,
+    dry_run: bool = False,
+    validate: bool = True,
+    batch_size: int = 500,
+) -> IngestionStats:
+    """Run the standard ingestion loop over any connected SourceAdapter."""
+    from src.adapters.base import SourceAdapter
+
+    assert isinstance(adapter, SourceAdapter)
+    stats = IngestionStats()
+
+    resolver = EntityResolver(
+        auto_merge_threshold=0.95,
+        merge_with_flag_threshold=0.85,
+        review_threshold=0.70,
+    )
+    lsr_store: dict[UUID, LSR] = {}
+    resolver.set_lsr_store(lsr_store)
+    validator = Validator() if validate else None
+
+    adapter.connect()
+    try:
+        for entry in adapter.fetch_all(batch_size=batch_size):
+            stats.words_attempted += 1
+            stats.entries_fetched += 1
+            try:
+                _process_entry(entry, resolver, lsr_store, stats, dry_run, validator)
+            except Exception as e:
+                stats.words_failed += 1
+                msg = f"Failed to process {source_label} entry '{entry.form}': {e}"
+                stats.errors.append(msg)
+                logger.warning(msg)
+
+            if stats.words_attempted % 500 == 0:
+                logger.info(
+                    f"{source_label} progress: {stats.words_attempted} entries, "
+                    f"{stats.lsrs_created} created, {stats.lsrs_merged} merged"
+                )
+    finally:
+        adapter.disconnect()
+
+    return stats
+
+
+def run_clics_ingestion(
+    data_dir: str | None = None,
+    languages_filter: list[str] | None = None,
+    colexified_only: bool = False,
+    dry_run: bool = False,
+    validate: bool = True,
+) -> IngestionStats:
+    """Run the CLICS colexification ingestion pipeline.
+
+    Args:
+        data_dir: Directory containing CLDF wordlist CSV files.
+        languages_filter: Optional list of language names to include.
+        colexified_only: If True, only ingest forms expressing 2+ concepts.
+        dry_run: If True, resolve but don't persist.
+        validate: If True, run validation.
+
+    Returns:
+        IngestionStats with counts and errors.
+    """
+    from src.adapters.clics import CLICSAdapter
+
+    adapter = CLICSAdapter(
+        data_dir=data_dir,
+        languages_filter=languages_filter,
+        min_colexifications=2 if colexified_only else 1,
+    )
+    return _run_adapter_ingestion(adapter, "CLICS", dry_run=dry_run, validate=validate)
+
+
+def run_corpus_ingestion(
+    corpus_dir: str | None = None,
+    language: str = "English",
+    language_code: str = "eng",
+    dry_run: bool = False,
+    validate: bool = True,
+) -> IngestionStats:
+    """Run the historical corpus ingestion pipeline.
+
+    Args:
+        corpus_dir: Directory of dated .txt documents (see CorpusAdapter).
+        language: Default language name for undated documents.
+        language_code: Default ISO 639-3 code.
+        dry_run: If True, resolve but don't persist.
+        validate: If True, run validation.
+
+    Returns:
+        IngestionStats with counts and errors.
+    """
+    from src.adapters.corpus import CorpusAdapter
+
+    adapter = CorpusAdapter(
+        corpus_dir=corpus_dir or "data/corpus",
+        language=language,
+        language_code=language_code,
+    )
+    return _run_adapter_ingestion(adapter, "Corpus", dry_run=dry_run, validate=validate)
+
+
 def _process_entry(
     entry: RawLexicalEntry,
     resolver: EntityResolver,
@@ -289,6 +397,7 @@ def _process_entry(
 
     if result.action == ResolutionAction.CREATE_NEW:
         lsr = convert_entry_to_lsr(entry)
+        _embedder.embed_lsr(lsr)
         if not dry_run:
             lsr_store[lsr.id] = lsr
             resolver.set_lsr_store(lsr_store)
@@ -303,6 +412,8 @@ def _process_entry(
             if existing:
                 new_lsr = convert_entry_to_lsr(entry)
                 resolver.merge_lsrs(existing, new_lsr)
+                # Merged definitions may have changed the semantics
+                _embedder.embed_lsr(existing)
         stats.lsrs_merged += 1
         logger.debug(
             f"Merged: {entry.form} ({entry.language_code}) -> "
@@ -311,6 +422,7 @@ def _process_entry(
 
     elif result.action in (ResolutionAction.MERGE_WITH_FLAG, ResolutionAction.FLAG_FOR_REVIEW):
         lsr = convert_entry_to_lsr(entry)
+        _embedder.embed_lsr(lsr)
         if not dry_run:
             lsr_store[lsr.id] = lsr
             resolver.set_lsr_store(lsr_store)
@@ -344,7 +456,7 @@ def main() -> None:
     parser.add_argument(
         "--source",
         type=str,
-        choices=["wiktionary", "wold"],
+        choices=["wiktionary", "wold", "clics", "corpus"],
         default="wiktionary",
         help="Data source to ingest from (default: wiktionary)",
     )
@@ -368,12 +480,23 @@ def main() -> None:
         "--data-dir",
         type=str,
         default=None,
-        help="Directory for WOLD CSV data files (default: data/wold)",
+        help="Directory for WOLD/CLICS CSV data files (default: data/<source>)",
     )
     parser.add_argument(
         "--borrowings-only",
         action="store_true",
         help="WOLD: only ingest entries with borrowing evidence",
+    )
+    parser.add_argument(
+        "--colexified-only",
+        action="store_true",
+        help="CLICS: only ingest forms that express two or more concepts",
+    )
+    parser.add_argument(
+        "--corpus-dir",
+        type=str,
+        default=None,
+        help="Corpus: directory of dated .txt documents (default: data/corpus)",
     )
     parser.add_argument(
         "--dry-run",
@@ -418,6 +541,28 @@ def main() -> None:
             data_dir=args.data_dir,
             languages_filter=languages,
             borrowings_only=args.borrowings_only,
+            dry_run=args.dry_run,
+            validate=not args.no_validate,
+        )
+    elif args.source == "clics":
+        languages = args.language.split(",") if args.language else None
+        mode = "DRY RUN" if args.dry_run else "LIVE"
+        logger.info(f"Starting CLICS ingestion ({mode})")
+
+        stats = run_clics_ingestion(
+            data_dir=args.data_dir,
+            languages_filter=languages,
+            colexified_only=args.colexified_only,
+            dry_run=args.dry_run,
+            validate=not args.no_validate,
+        )
+    elif args.source == "corpus":
+        mode = "DRY RUN" if args.dry_run else "LIVE"
+        logger.info(f"Starting corpus ingestion ({mode})")
+
+        stats = run_corpus_ingestion(
+            corpus_dir=args.corpus_dir,
+            language=args.language or "English",
             dry_run=args.dry_run,
             validate=not args.no_validate,
         )

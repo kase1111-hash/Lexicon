@@ -206,12 +206,11 @@ class SemanticDriftAnalyzer:
                 continue
 
             mid_date = (date_start + (date_end or date_start)) // 2
-            embedding = entry.get("semantic_vector", [])
+            embedding = entry.get("semantic_vector") or []
 
             point = TrajectoryPoint(
                 date=mid_date,
                 embedding_full=embedding,
-                embedding_2d=self._reduce_to_2d(embedding) if embedding else (0.0, 0.0),
                 definition=entry.get("definition_primary"),
                 attestation_count=len(entry.get("attestations", [])),
                 confidence=entry.get("confidence_overall", 1.0),
@@ -223,6 +222,10 @@ class SemanticDriftAnalyzer:
 
         if not points:
             return None
+
+        # Project embeddings to 2D with PCA across the whole trajectory, so
+        # coordinates are comparable between points
+        self._assign_2d_coordinates(points)
 
         # Detect shift events
         shift_events = self._detect_shifts_from_points(points)
@@ -347,28 +350,37 @@ class SemanticDriftAnalyzer:
             },
         }
 
-    def _reduce_to_2d(self, embedding: list[float]) -> tuple[float, float]:
+    def _assign_2d_coordinates(self, points: list[TrajectoryPoint]) -> None:
         """
-        Reduce a high-dimensional embedding to 2D for visualization.
+        Assign PCA-projected 2D coordinates to trajectory points.
 
-        Uses a simple projection (first two principal components approximation).
-        In production, would use proper PCA or t-SNE.
-
-        Args:
-            embedding: High-dimensional embedding vector.
-
-        Returns:
-            Tuple of (x, y) coordinates.
+        The projection is fit across all embeddings in the trajectory, so
+        distances between points reflect relative semantic movement. Points
+        without an embedding keep (0.0, 0.0).
         """
-        if not embedding or len(embedding) < 2:
-            return (0.0, 0.0)
+        from src.utils.embeddings import EmbeddingUtils
 
-        # Simple approach: use first two dimensions scaled by later dimensions
-        # This is a placeholder - real implementation would use trained PCA
-        x = sum(embedding[::2]) / len(embedding) * 2
-        y = sum(embedding[1::2]) / len(embedding) * 2
+        embedded_points = [p for p in points if p.embedding_full]
+        if not embedded_points:
+            return
 
-        return (round(x, 4), round(y, 4))
+        # PCA requires equal-length vectors; use the dominant length
+        lengths = [len(p.embedding_full) for p in embedded_points]
+        dim = max(set(lengths), key=lengths.count)
+        usable = [p for p in embedded_points if len(p.embedding_full) == dim]
+        if not usable:
+            return
+
+        try:
+            coords = EmbeddingUtils.reduce_dimensions(
+                [p.embedding_full for p in usable], target_dim=2, method="pca"
+            )
+        except ValueError as e:
+            logger.warning(f"2D projection failed: {e}")
+            return
+
+        for point, (x, y) in zip(usable, coords, strict=True):
+            point.embedding_2d = (round(x, 4), round(y, 4))
 
     def _detect_shifts_from_points(
         self,

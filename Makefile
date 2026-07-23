@@ -170,6 +170,12 @@ ingest-wiktionary:
 ingest-clld:
 	python -m src.ingestion --source wold
 
+ingest-clics:
+	python -m src.ingestion --source clics
+
+ingest-corpus:
+	python -m src.ingestion --source corpus
+
 # =============================================================================
 # Build & Release Commands
 # =============================================================================

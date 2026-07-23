@@ -108,6 +108,7 @@ async def _build_trajectory_data(db: DatabaseManager, form: str, language: str) 
                        l.date_start AS date_start,
                        l.date_end AS date_end,
                        l.definition_primary AS definition,
+                       l.semantic_vector AS semantic_vector,
                        l.id AS id
                 ORDER BY l.date_start
                 """,
@@ -121,6 +122,7 @@ async def _build_trajectory_data(db: DatabaseManager, form: str, language: str) 
                         "date_start": record["date_start"],
                         "date_end": record["date_end"],
                         "definition_primary": record["definition"],
+                        "semantic_vector": list(record["semantic_vector"] or []),
                         "language_code": language,
                         "id": record["id"],
                     }
