@@ -97,7 +97,8 @@ Issues = "https://github.com/linguistic-stratigraphy/linguistic-stratigraphy/iss
 
 [project.scripts]
 ls-api = "src.api.main:run"
-ls-ingest = "src.adapters.wiktionary:main"
+ls-ingest = "src.ingestion:main"
+lexicon = "src.cli:main"
 
 [build-system]
 requires = ["hatchling"]

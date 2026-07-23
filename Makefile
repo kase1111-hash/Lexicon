@@ -139,7 +139,16 @@ db-init:
 	./scripts/setup_databases.sh
 
 db-migrate:
-	@echo "Database migrations not yet implemented"
+	alembic upgrade head
+
+db-migrate-down:
+	alembic downgrade -1
+
+db-revision:
+	alembic revision --autogenerate -m "$(MSG)"
+
+db-migrate-history:
+	alembic history --verbose
 
 # =============================================================================
 # API Commands
@@ -156,10 +165,16 @@ run-api-prod:
 # =============================================================================
 
 ingest-wiktionary:
-	python -m src.adapters.wiktionary
+	python -m src.ingestion --source wiktionary --words data/seed_words_eng.txt
 
 ingest-clld:
-	python -m src.adapters.clld
+	python -m src.ingestion --source wold
+
+ingest-clics:
+	python -m src.ingestion --source clics
+
+ingest-corpus:
+	python -m src.ingestion --source corpus
 
 # =============================================================================
 # Build & Release Commands

@@ -83,6 +83,7 @@ class EntityResolver:
         # These would be injected in production
         self._lsr_store: dict[UUID, LSR] = {}
         self._form_index: dict[str, list[UUID]] = {}
+        self._phonetic_index: dict[str, list[UUID]] = {}
 
     def set_lsr_store(self, store: dict[UUID, LSR]) -> None:
         """Set the LSR store for resolution lookups."""
@@ -90,13 +91,24 @@ class EntityResolver:
         self._rebuild_index()
 
     def _rebuild_index(self) -> None:
-        """Rebuild the form index from the LSR store."""
+        """Rebuild the form and phonetic indices from the LSR store."""
         self._form_index.clear()
+        self._phonetic_index.clear()
         for lsr_id, lsr in self._lsr_store.items():
             key = f"{lsr.form_normalized}{self.INDEX_KEY_SEPARATOR}{lsr.language_code}"
             if key not in self._form_index:
                 self._form_index[key] = []
             self._form_index[key].append(lsr_id)
+            for phonetic_key in self._phonetic_keys(lsr.form_normalized, lsr.language_code):
+                self._phonetic_index.setdefault(phonetic_key, []).append(lsr_id)
+
+    def _phonetic_keys(self, form: str, language_code: str) -> list[str]:
+        """Build Soundex and Metaphone index keys for a form."""
+        keys = []
+        for code in (PhoneticUtils.soundex(form), PhoneticUtils.metaphone(form)):
+            if code:
+                keys.append(f"{code}{self.INDEX_KEY_SEPARATOR}{language_code}")
+        return keys
 
     def resolve(self, entry: RawLexicalEntry) -> ResolutionResult:
         """
@@ -177,6 +189,11 @@ class EntityResolver:
             distance = PhoneticUtils.levenshtein_distance(form_normalized, stored_form)
             if distance <= 2:
                 candidates.update(ids)
+
+        # Strategy 3: Phonetic matching (Soundex/Metaphone)
+        for phonetic_key in self._phonetic_keys(form_normalized, language_code):
+            if phonetic_key in self._phonetic_index:
+                candidates.update(self._phonetic_index[phonetic_key])
 
         return list(candidates)
 

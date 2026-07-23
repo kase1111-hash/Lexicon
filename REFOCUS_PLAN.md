@@ -1,5 +1,10 @@
 # REFOCUS PLAN
 
+> **STATUS: EXECUTED.** The cuts in Phase 0 and the core-loop work in
+> Phases 1-3 are done, and the items this plan deferred (CLICS, corpus
+> adapter, GraphQL, embeddings, phonetic matching) have since been
+> implemented as well. Kept as a record of the decision-making.
+
 This plan reorganizes the Lexicon project around one goal: **get the core loop working end-to-end with real data before adding anything new.** It is structured in 4 phases. Each phase has a concrete exit milestone. Do not start the next phase until the current one's milestone is met.
 
 ---

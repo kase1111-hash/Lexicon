@@ -108,15 +108,17 @@ tests/
 
 ## API Endpoints
 
-**REST (v1):**
-- `GET/POST/PUT/DELETE /lsr/{id}` - LSR CRUD operations
-- `POST /analysis/etymology` - Trace etymology chain
-- `POST /analysis/date-text` - Estimate text date
-- `POST /analysis/detect-anachronisms` - Find anachronistic vocabulary
-- `POST /analysis/contact-detection` - Detect borrowing patterns
-- `GET /graph/{id}/ancestors|descendants|cognates` - Graph traversal
+**REST (`/api/v1`):**
+- `GET/POST/DELETE /lsr/{id}`, `GET /lsr/search` - LSR CRUD and search
+- `GET /lsr/{id}/etymology|descendants|cognates|borrowings` - Graph traversal
+- `POST /analyze/date-text` - Estimate text date
+- `POST /analyze/detect-anachronisms` - Find anachronistic vocabulary
+- `GET /analyze/contact-events` - Detect language contact events
+- `GET /analyze/semantic-drift` - Semantic drift trajectory
+- `POST /graph/query`, `GET /graph/path|etymology|cognates` - Graph queries
+- `POST /graph/bulk/export` (+ `/bulk/status/{id}`, `/bulk/result/{id}`) - Exports
 
-**GraphQL:** `/graphql`
+**GraphQL:** `/graphql` (GraphiQL playground in browser)
 
 **Docs:** `/docs` (Swagger) | `/redoc` (ReDoc)
 

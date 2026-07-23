@@ -72,9 +72,7 @@ def convert_openapi_to_postman(openapi_spec: dict) -> dict:
                 # Add request body for POST/PUT/PATCH
                 if method in ("post", "put", "patch"):
                     request_body = details.get("requestBody", {})
-                    json_content = request_body.get("content", {}).get(
-                        "application/json", {}
-                    )
+                    json_content = request_body.get("content", {}).get("application/json", {})
                     schema = json_content.get("schema", {})
 
                     # Generate example body from schema
@@ -152,9 +150,7 @@ def generate_example_from_schema(
         result = {}
         properties = schema.get("properties", {})
         for prop_name, prop_schema in properties.items():
-            result[prop_name] = generate_example_from_schema(
-                prop_schema, openapi_spec, depth + 1
-            )
+            result[prop_name] = generate_example_from_schema(prop_schema, openapi_spec, depth + 1)
         return result
 
     if schema_type == "array":

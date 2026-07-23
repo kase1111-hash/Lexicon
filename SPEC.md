@@ -1,6 +1,16 @@
 # Computational Linguistic Stratigraphy
 ## Automated Implementation Specification v1.0
 
+> **STATUS NOTE (2026-07):** This is the original design specification — a
+> target state, not a description of the current implementation. After the
+> refocus (`REFOCUS_PLAN.md`), the implemented system deliberately diverges
+> from parts of this spec: there is no Airflow/Milvus/Kubernetes/OCR — the
+> stack is Neo4j, PostgreSQL, Elasticsearch, and Redis behind one FastAPI
+> service; ingestion is driven by `src/ingestion.py` (Wiktionary, WOLD,
+> CLICS, local corpora) rather than DAGs; and embeddings come from a
+> lightweight deterministic encoder rather than trained transformer models.
+> See README.md and docs/architecture.md for what exists today.
+
 ---
 
 ## Executive Summary

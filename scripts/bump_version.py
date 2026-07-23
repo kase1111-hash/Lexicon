@@ -76,7 +76,7 @@ def update_pyproject(new_version: str) -> None:
         f'version = "{new_version}"',
         content,
         count=1,
-        flags=re.MULTILINE
+        flags=re.MULTILINE,
     )
     PYPROJECT_FILE.write_text(updated)
     print(f"  Updated {PYPROJECT_FILE}")
@@ -93,7 +93,7 @@ def update_init_file(new_version: str) -> None:
         f'__version__ = "{new_version}"',
         content,
         count=1,
-        flags=re.MULTILINE
+        flags=re.MULTILINE,
     )
     INIT_FILE.write_text(updated)
     print(f"  Updated {INIT_FILE}")
@@ -106,10 +106,7 @@ def update_config_file(new_version: str) -> None:
 
     content = CONFIG_FILE.read_text()
     updated = re.sub(
-        r'app_version:\s*str\s*=\s*"[^"]*"',
-        f'app_version: str = "{new_version}"',
-        content,
-        count=1
+        r'app_version:\s*str\s*=\s*"[^"]*"', f'app_version: str = "{new_version}"', content, count=1
     )
     CONFIG_FILE.write_text(updated)
     print(f"  Updated {CONFIG_FILE}")
@@ -148,10 +145,10 @@ def main() -> int:
     print(f"Version bumped to {new_version}")
     print()
     print("Next steps:")
-    print(f"  1. git add -A")
+    print("  1. git add -A")
     print(f"  2. git commit -m 'chore: bump version to {new_version}'")
     print(f"  3. git tag v{new_version}")
-    print(f"  4. git push origin main --tags")
+    print("  4. git push origin main --tags")
 
     return 0
 

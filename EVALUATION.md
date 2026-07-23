@@ -1,7 +1,16 @@
 # PROJECT EVALUATION REPORT
 
+> **HISTORICAL SNAPSHOT — pre-refocus.** This evaluation describes the
+> codebase as it stood before the refocus (see `REFOCUS_PLAN.md`) was
+> executed. Much of what it critiques no longer exists: `src/training/`,
+> `src/adapters/ocr.py`, `k8s/`, `dags/`, Milvus, Airflow, and the
+> cloud-secrets-manager config were all deleted, and the stub modules it
+> flags (CLLD adapter, corpus adapter, GraphQL, embeddings, phonetics)
+> have since been implemented. See "Resolution Status" at the end of this
+> document for the current state. Kept for historical context.
+
 **Project:** Lexicon (Computational Linguistic Stratigraphy)
-**Primary Classification:** Underdeveloped
+**Primary Classification (at time of evaluation):** Underdeveloped
 **Secondary Tags:** Good Concept, Over-Engineered Infrastructure
 
 ---
@@ -140,3 +149,30 @@ This project has a sound concept and competent code in the parts that are actual
 **The path forward is subtraction, not addition.** Strip out everything that doesn't serve the core loop: ingest data -> build graph -> query graph -> analyze. Get that loop working end-to-end with real data before adding a single new feature, dependency, or infrastructure component.
 
 **Next Step:** Delete `src/training/`, `k8s/`, `dags/`, and the unused adapters. Trim `requirements.txt` to actual imports. Then run the Wiktionary adapter against 1,000 English words and store the results in Neo4j. That single milestone will teach you more about what this project actually needs than 1,729 lines of specification ever could.
+
+---
+
+## RESOLUTION STATUS (2026-07)
+
+The refocus recommended above was executed (`REFOCUS_PLAN.md`), and the
+gaps this evaluation identified have since been closed:
+
+**CUT (done):** `src/training/`, `src/adapters/ocr.py`, `k8s/`, `dags/`,
+Milvus/etcd/minio, Airflow, cloud secrets-manager config, and the unused
+ML dependencies (torch, transformers, xgboost, spaCy, Stanza, etc.) were
+all removed. The stack is now four stores (Neo4j, PostgreSQL,
+Elasticsearch, Redis) behind one FastAPI service.
+
+**DOUBLE DOWN (done):** The core loop works end-to-end — Wiktionary and
+WOLD ingestion drive `EntityResolver` → validation → relationship
+extraction → `LSRRepository`, exercised by integration tests. The
+Elasticsearch path in `search()` is implemented with Neo4j fallback.
+
+**DEFERRED items (since implemented):** CLLD/WOLD adapter, CLICS
+colexification adapter, historical corpus adapter, GraphQL endpoint
+(mounted at `/graphql` with real resolvers), embedding generation
+(deterministic hashed n-gram encoder feeding semantic drift), and
+phonetic matching (Soundex/Metaphone/IPA distance) in entity resolution.
+
+The test suite currently stands at 650+ passing tests with ruff, black,
+mypy, and bandit clean.

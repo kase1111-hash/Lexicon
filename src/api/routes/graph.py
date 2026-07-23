@@ -7,7 +7,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from src.exceptions import DatabaseError, ValidationError
+from src.api.jobs import JobStatus, job_registry
+from src.exceptions import DatabaseError, NotFoundError, ValidationError
 from src.utils.db import DatabaseManager, get_db
 from src.utils.validation import GraphQueryRequest
 
@@ -275,8 +276,72 @@ class BulkExportRequest(BaseModel):
     """Request for bulk data export."""
 
     language: str = Field(..., description="ISO 639-3 language code")
-    format: str = Field("json", description="Export format: json, csv, or rdf")
+    format: str = Field("json", pattern="^(json|csv)$", description="Export format: json or csv")
     include_relationships: bool = Field(True, description="Include relationship data")
+    run_async: bool = Field(
+        False,
+        description="Run as a background job; poll /bulk/status/{job_id} and "
+        "fetch the payload from /bulk/result/{job_id}",
+    )
+
+
+async def _run_bulk_export(db: DatabaseManager, request: BulkExportRequest) -> dict[str, Any]:
+    """Execute the export and build the payload for the requested format."""
+    query = """
+    MATCH (l:LSR {language_code: $lang})
+    RETURN l
+    LIMIT 10000
+    """
+    async with db.neo4j_session() as session:
+        result = await session.run(query, {"lang": request.language})
+        records = await result.fetch(10000)
+        lsrs = [_serialize_neo4j_value(r["l"]) for r in records]
+
+    relationships: list[dict[str, Any]] = []
+    if request.include_relationships:
+        rel_query = """
+        MATCH (a:LSR {language_code: $lang})-[r]->(b:LSR)
+        RETURN a.id AS source, type(r) AS type, b.id AS target
+        LIMIT 50000
+        """
+        async with db.neo4j_session() as session:
+            result = await session.run(rel_query, {"lang": request.language})
+            rel_records = await result.fetch(50000)
+            relationships = [
+                {"source": r["source"], "type": r["type"], "target": r["target"]}
+                for r in rel_records
+            ]
+
+    payload: dict[str, Any] = {
+        "format": request.format,
+        "language": request.language,
+        "count": len(lsrs),
+        "relationship_count": len(relationships),
+    }
+    if request.format == "csv":
+        payload["csv"] = _lsrs_to_csv(lsrs)
+    else:
+        payload["items"] = lsrs
+        if request.include_relationships:
+            payload["relationships"] = relationships
+    return payload
+
+
+def _lsrs_to_csv(lsrs: list[Any]) -> str:
+    """Serialize exported LSR dicts to CSV (union of keys, sorted header)."""
+    import csv
+    import io
+
+    dict_rows = [row for row in lsrs if isinstance(row, dict)]
+    if not dict_rows:
+        return ""
+    fieldnames = sorted({key for row in dict_rows for key in row})
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in dict_rows:
+        writer.writerow(row)
+    return buffer.getvalue()
 
 
 @router.post("/bulk/export")
@@ -285,52 +350,75 @@ async def create_bulk_export(
     db: DatabaseManager = Depends(get_db_manager),
 ) -> dict[str, Any]:
     """
-    Create a bulk export job for LSRs in a language.
+    Export LSRs (and optionally relationships) for a language.
 
-    Note: Full async job processing not yet implemented.
-    Returns immediate results for small datasets.
+    With run_async=false (default) the export runs inline and the payload
+    is returned directly. With run_async=true a background job is created;
+    poll /bulk/status/{job_id} and fetch the result from
+    /bulk/result/{job_id} once completed.
     """
-    logger.info(f"Creating bulk export for {request.language} in {request.format} format")
+    logger.info(
+        f"Bulk export for {request.language} in {request.format} format "
+        f"(async={request.run_async})"
+    )
 
-    # For now, return a simple export (not async job-based)
-    query = """
-    MATCH (l:LSR {language_code: $lang})
-    RETURN l
-    LIMIT 10000
-    """
+    if request.run_async:
+        job = job_registry.submit(
+            "bulk_export",
+            lambda: _run_bulk_export(db, request),
+            params={"language": request.language, "format": request.format},
+        )
+        return {
+            "status": "accepted",
+            "job_id": job.id,
+            "status_url": f"/api/v1/graph/bulk/status/{job.id}",
+            "result_url": f"/api/v1/graph/bulk/result/{job.id}",
+        }
 
     try:
-        async with db.neo4j_session() as session:
-            result = await session.run(query, {"lang": request.language})
-            records = await result.fetch(10000)
-
-            lsrs = [_serialize_neo4j_value(r["l"]) for r in records]
-
-            return {
-                "status": "completed",
-                "format": request.format,
-                "language": request.language,
-                "count": len(lsrs),
-                "message": f"Exported {len(lsrs)} LSRs",
-            }
-
+        payload = await _run_bulk_export(db, request)
     except RuntimeError as e:
         raise DatabaseError(message=f"Neo4j not connected: {e}") from e
     except Exception as e:
         logger.error(f"Bulk export failed: {e}")
         raise DatabaseError(message="Bulk export failed") from e
 
+    return {
+        "status": "completed",
+        "message": f"Exported {payload['count']} LSRs",
+        **payload,
+    }
+
 
 @router.get("/bulk/status/{job_id}")
 async def get_export_status(job_id: str) -> dict[str, Any]:
     """Get status of a bulk export job."""
-    # Job-based export not yet implemented
-    return {
-        "job_id": job_id,
-        "status": "not_found",
-        "message": "Async job processing not yet implemented. Use /bulk/export for immediate results.",
-        "download_url": None,
-    }
+    job = job_registry.get(job_id)
+    if job is None:
+        return {
+            "job_id": job_id,
+            "status": "not_found",
+            "message": "No such job (jobs expire an hour after completion)",
+            "download_url": None,
+        }
+    status = job.to_dict()
+    status["download_url"] = (
+        f"/api/v1/graph/bulk/result/{job_id}" if job.status == JobStatus.COMPLETED else None
+    )
+    return status
+
+
+@router.get("/bulk/result/{job_id}")
+async def get_export_result(job_id: str) -> dict[str, Any]:
+    """Fetch the payload of a completed bulk export job."""
+    job = job_registry.get(job_id)
+    if job is None:
+        raise NotFoundError(resource_type="Export job", resource_id=job_id)
+    if job.status == JobStatus.FAILED:
+        raise DatabaseError(message=f"Export job failed: {job.error}")
+    if job.status != JobStatus.COMPLETED:
+        return {"job_id": job_id, "status": job.status.value, "message": "Job still running"}
+    return {"job_id": job_id, "status": "completed", **job.result}
 
 
 def _serialize_neo4j_value(value: Any) -> Any:

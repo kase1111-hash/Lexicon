@@ -38,7 +38,7 @@ class Language(Base):
     code = Column(String(10), unique=True, nullable=False, index=True)
     name = Column(String(100), nullable=False)
     family = Column(String(100))
-    branch = Column(ARRAY(String))
+    branch: Column[list[str]] = Column(ARRAY(String))
     status = Column(String(50), default="living")  # living, extinct, reconstructed
     speaker_count = Column(Integer)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -79,11 +79,11 @@ class LSRMetadata(Base):
 
     # Semantic data
     definition_primary = Column(Text)
-    part_of_speech = Column(ARRAY(String))
-    semantic_fields = Column(ARRAY(String))
+    part_of_speech: Column[list[str]] = Column(ARRAY(String))
+    semantic_fields: Column[list[str]] = Column(ARRAY(String))
 
     # Metadata
-    source_databases = Column(ARRAY(String))
+    source_databases: Column[list[str]] = Column(ARRAY(String))
     confidence_overall = Column(Float, default=1.0)
     reconstruction_flag = Column(Boolean, default=False)
     human_validated = Column(Boolean, default=False)
