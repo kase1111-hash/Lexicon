@@ -30,6 +30,6 @@ sentry-sdk[fastapi]==2.19.2
 
 # Utils
 pywikibot==9.6.0
-lxml==5.3.1
+lxml==6.0.2
 tqdm==4.67.1
 python-Levenshtein==0.26.1
