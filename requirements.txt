@@ -21,7 +21,7 @@ sqlalchemy==2.0.51
 alembic==1.18.5
 
 # Numeric
-numpy==1.26.4
+numpy==2.4.6
 
 # API
 # fastapi 0.137+ registers included routers lazily, which breaks the
