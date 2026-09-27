@@ -50,7 +50,7 @@ dependencies = [
     "numpy>=1.24",
 
     # API (fastapi 0.137+ breaks the route-template labels of request metrics)
-    "fastapi>=0.135,<0.137",
+    "fastapi>=0.135,<0.142",
     "starlette>=1.3.1",
     "uvicorn>=0.23",
     "strawberry-graphql>=0.315.7",

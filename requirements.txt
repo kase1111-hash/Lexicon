@@ -4,8 +4,8 @@
 # CI checks these pins with `pip-audit -r requirements.txt`
 
 # Core
-pydantic==2.10.6
-pydantic-settings==2.7.1
+pydantic==2.13.5
+pydantic-settings==2.15.0
 python-dotenv==1.2.3
 httpx==0.28.1
 # HTTP transport of the async Elasticsearch client
@@ -16,9 +16,9 @@ neo4j==5.27.0
 elasticsearch==8.17.1
 redis==5.2.1
 # PostgreSQL (optional, reserved for future use): migrations and loader only
-asyncpg==0.30.0
-sqlalchemy==2.0.51
-alembic==1.18.5
+asyncpg==0.31.0
+sqlalchemy==2.0.54
+alembic==1.20.0
 
 # Numeric
 numpy==1.26.4
@@ -26,14 +26,14 @@ numpy==1.26.4
 # API
 # fastapi 0.137+ registers included routers lazily, which breaks the
 # route-template labels of the request metrics; stay below it until handled
-fastapi==0.136.3
+fastapi==0.141.1
 starlette==1.7.0
-uvicorn==0.34.0
-strawberry-graphql==0.315.7
+uvicorn==0.53.0
+strawberry-graphql==0.327.7
 
 # Error Tracking & Monitoring (releases before 2.56 fail to initialize with the
 # strawberry-graphql and starlette above, which leaves Sentry off)
 sentry-sdk[fastapi]==2.70.0
 
 # Utils
-python-Levenshtein==0.26.1
+python-Levenshtein==0.27.5
