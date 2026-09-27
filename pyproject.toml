@@ -42,7 +42,7 @@ dependencies = [
     # Databases (the async Elasticsearch client needs its aiohttp transport;
     # client 9.x does not talk to the 8.x server)
     "neo4j>=5.0",
-    "elasticsearch[async]>=8.0,<9",
+    "elasticsearch[async]>=8.0,<10",
     "aiohttp>=3.14.3",
     "redis>=4.0",
 
