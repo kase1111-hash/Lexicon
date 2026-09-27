@@ -6,10 +6,19 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from src.exceptions import DatabaseError, InvalidDateRangeError
+from src.exceptions import (
+    DuplicateError,
+    InvalidDateRangeError,
+    InvalidLanguageCodeError,
+    LSRNotFoundError,
+)
 from src.models import ErrorResponse
 from src.models.lsr import LSR
-from src.repositories.lsr_repository import LSRRepository
+from src.repositories.lsr_repository import (
+    DEFAULT_ETYMOLOGY_DEPTH,
+    MAX_LINEAGE_DEPTH,
+    LSRRepository,
+)
 from src.utils.cache import (
     LSR_CACHE_TTL,
     SEARCH_CACHE_TTL,
@@ -21,13 +30,20 @@ from src.utils.cache import (
 from src.utils.db import get_db
 from src.utils.validation import (
     LSRCreateRequest,
-    sanitize_iso_code,
+    normalize_language_code,
     sanitize_string,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Deepest page a search may ask for; larger offsets are a 400, not a value the
+# database cannot take (Neo4j's SKIP is a 64-bit integer)
+MAX_SEARCH_OFFSET = 10_000_000
+
+# Glottolog languoid codes (e.g. "nort3160"), which WOLD uses for donor
+# languages that have no ISO 639-3 code.
 
 
 async def get_lsr_repository() -> LSRRepository:
@@ -36,35 +52,87 @@ async def get_lsr_repository() -> LSRRepository:
     return LSRRepository(db)
 
 
+def _parse_language(value: str) -> str:
+    """Normalize a language filter to a stored code, or raise a 400.
+
+    Accepts ISO 639-3 codes and extensions ("eng", "gem-pro"), common
+    ISO 639-1 codes ("en" -> "eng") and Glottolog codes ("nort3160").
+    """
+    try:
+        return normalize_language_code(value)
+    except ValueError as e:
+        raise InvalidLanguageCodeError(language_code=value) from e
+
+
+def _lsr_payload(repo: LSRRepository, lsr: LSR) -> dict:
+    """An LSR read through `repo` as JSON, with its relationship counts.
+
+    The relationship id lists hold at most MAX_LINKED_IDS ids each;
+    relationship_counts has the full numbers and relationship_ids_truncated
+    says whether any list was cut short.
+    """
+    return {**lsr.model_dump(mode="json"), **repo.relationship_summary(lsr.id)}
+
+
+async def _require_lsr(repo: LSRRepository, lsr_id: UUID) -> None:
+    """Raise LSRNotFoundError (404) unless the LSR exists."""
+    if not await repo.exists(lsr_id):
+        raise LSRNotFoundError(lsr_id=str(lsr_id))
+
+
 @router.get("/search")
 async def search_lsr(
-    form: str | None = Query(None, description="Form to search (exact or fuzzy)", max_length=200),
-    language: str | None = Query(None, description="ISO 639-3 language code", max_length=10),
+    form: str | None = Query(
+        None,
+        description=(
+            "Form to search: substring of the written form (case- and "
+            "diacritic-insensitive). With Elasticsearch connected, near misses "
+            "(typos) also match and results are ranked by relevance."
+        ),
+        max_length=200,
+    ),
+    language: str | None = Query(
+        None,
+        description="Language code: ISO 639-3 ('eng', 'gem-pro'), ISO 639-1 ('en') or Glottocode",
+        max_length=20,
+    ),
     date_start: int | None = Query(
-        None, description="Start year (negative for BCE)", ge=-10000, le=2100
+        None,
+        description=(
+            "Start year (negative for BCE). With date_end, matches LSRs in use at any "
+            "point in the range; undated LSRs are excluded."
+        ),
+        ge=-10000,
+        le=2100,
     ),
     date_end: int | None = Query(None, description="End year", ge=-10000, le=2100),
-    semantic_field: str | None = Query(None, description="WordNet synset ID filter", max_length=50),
+    semantic_field: str | None = Query(
+        None, description="Semantic field (exact match)", max_length=50
+    ),
     limit: int = Query(20, ge=1, le=100, description="Maximum results to return"),
-    offset: int = Query(0, ge=0, description="Number of results to skip"),
+    offset: int = Query(0, ge=0, le=MAX_SEARCH_OFFSET, description="Number of results to skip"),
     repo: LSRRepository = Depends(get_lsr_repository),
 ) -> dict:
     """
     Search for LSRs matching criteria.
 
     Supports filtering by:
-    - Form (orthographic, supports fuzzy matching)
-    - Language code (ISO 639-3)
-    - Date range
-    - Semantic field (WordNet synset)
+    - Form (substring; fuzzy as well when Elasticsearch is connected)
+    - Language code (invalid codes are rejected with 400 INVALID_LANGUAGE_CODE)
+    - Date range: an LSR matches when it was in use during the range (first
+      attested no later than date_end, last attested no earlier than
+      date_start or still in use); undated LSRs never match a date filter
+    - Semantic field
 
-    Returns paginated results.
+    Returns paginated results in a stable order (offset at most 10,000,000).
+    `filters` echoes the filters actually applied (e.g. language "en" is
+    applied as "eng").
     """
     # Sanitize inputs
     if form:
         form = sanitize_string(form, max_length=200)
     if language:
-        language = sanitize_iso_code(language)
+        language = _parse_language(language)
     if semantic_field:
         semantic_field = sanitize_string(semantic_field, max_length=50)
 
@@ -104,7 +172,7 @@ async def search_lsr(
     )
 
     response = {
-        "results": [lsr.model_dump(mode="json") for lsr in results],
+        "results": [_lsr_payload(repo, lsr) for lsr in results],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -117,8 +185,9 @@ async def search_lsr(
         },
     }
 
-    # Cache the result
-    await cache.set(cache_key, response, SEARCH_CACHE_TTL)
+    # Cache the result, unless it lacks the fuzzy matches of a working index
+    if not repo.search_degraded:
+        await cache.set(cache_key, response, SEARCH_CACHE_TTL)
     return response
 
 
@@ -133,8 +202,14 @@ async def get_lsr(
     """
     Get a full LSR record by ID.
 
-    Returns the complete Lexical State Record including all fields,
-    attestations, and relationship IDs.
+    Returns the stored Lexical State Record. The relationship fields list
+    the directly linked LSRs: ancestor_ids / descendant_ids (DESCENDS_FROM),
+    cognate_ids (COGNATE_OF), loan_source_id (the most confident
+    BORROWED_FROM donor) and loan_target_ids. Each list holds at most 100
+    ids (the lowest); relationship_counts gives the full counts and
+    relationship_ids_truncated says whether a list was cut short. The
+    /etymology, /descendants, /cognates and /borrowings endpoints give the
+    full traversals.
     """
     # Check cache first
     cache = await get_cache()
@@ -146,7 +221,7 @@ async def get_lsr(
 
     logger.info(f"Fetching LSR: {lsr_id}")
     lsr = await repo.get_by_id(lsr_id)
-    result = {"data": lsr.model_dump(mode="json")}
+    result = {"data": _lsr_payload(repo, lsr)}
 
     # Cache the result
     await cache.set(cache_key, result, LSR_CACHE_TTL)
@@ -156,7 +231,7 @@ async def get_lsr(
 @router.post(
     "/",
     status_code=201,
-    responses={400: {"model": ErrorResponse}},
+    responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
 )
 async def create_lsr(
     request: LSRCreateRequest,
@@ -167,6 +242,9 @@ async def create_lsr(
 
     The form_orthographic and language_code are required.
     Other fields are optional.
+
+    Returns 409 DUPLICATE_ERROR if an LSR with the same normalized form,
+    language and date_start already exists.
     """
     logger.info(f"Creating LSR: {request.form_orthographic} ({request.language_code})")
 
@@ -179,6 +257,10 @@ async def create_lsr(
         date_start=request.date_start,
         date_end=request.date_end,
     )
+
+    existing_id = await repo.find_duplicate(lsr.form_normalized, lsr.language_code, lsr.date_start)
+    if existing_id:
+        raise DuplicateError(resource_type="LSR", identifier=existing_id)
 
     # Persist to database
     created_lsr = await repo.create(lsr)
@@ -208,8 +290,10 @@ async def delete_lsr(
     logger.info(f"Deleting LSR: {lsr_id}")
     await repo.delete(lsr_id)
 
-    # Invalidate caches
+    # Invalidate caches: this LSR, the searches, and every cached LSR, since
+    # its neighbours' cached records list it among their relationship ids.
     await invalidate_lsr_cache(str(lsr_id))
+    await (await get_cache()).delete_pattern("lexicon:lsr:*")
 
     return {"message": f"LSR {lsr_id} deleted successfully"}
 
@@ -220,67 +304,37 @@ async def delete_lsr(
 )
 async def get_etymology(
     lsr_id: UUID,
+    max_depth: int = Query(
+        DEFAULT_ETYMOLOGY_DEPTH,
+        ge=1,
+        le=MAX_LINEAGE_DEPTH,
+        description="Maximum number of DESCENDS_FROM steps to follow",
+    ),
     repo: LSRRepository = Depends(get_lsr_repository),
 ) -> dict:
     """
-    Get the full etymology chain to proto-form.
+    Get the etymology chain to the proto-form.
 
-    Traces the DESCENDS_FROM relationships back to the earliest
-    reconstructed or attested ancestor.
+    Follows DESCENDS_FROM relationships back to the deepest ancestor that
+    has no further ancestor (the proto-form), along a shortest path. The
+    chain starts with the LSR itself; an LSR without ancestors is its own
+    proto-form (depth 0). If max_depth cuts off any line of ancestry
+    (so a deeper proto-form may lie beyond it), `truncated` is true, the
+    chain ends at the farthest ancestor found and proto_form is null.
     """
     logger.info(f"Fetching etymology for LSR: {lsr_id}")
 
-    # Verify LSR exists
-    await repo.get_by_id(lsr_id)
+    chain, complete = await repo.get_etymology_chain(lsr_id, max_depth=max_depth)
+    if not chain:
+        raise LSRNotFoundError(lsr_id=str(lsr_id))
 
-    query = """
-    MATCH path = (start:LSR {id: $lsr_id})-[:DESCENDS_FROM*0..]->(ancestor:LSR)
-    WHERE NOT (ancestor)-[:DESCENDS_FROM]->()
-    RETURN path
-    ORDER BY length(path) DESC
-    LIMIT 1
-    """
-
-    try:
-        async with repo.db.neo4j_session() as session:
-            result = await session.run(query, {"lsr_id": str(lsr_id)})
-            record = await result.single()
-
-            if not record:
-                return {
-                    "lsr_id": str(lsr_id),
-                    "chain": [],
-                    "proto_form": None,
-                    "depth": 0,
-                }
-
-            path = record["path"]
-            chain = []
-            for node in path.nodes:
-                chain.append(
-                    {
-                        "id": dict(node).get("id"),
-                        "form": dict(node).get("form_orthographic"),
-                        "language_code": dict(node).get("language_code"),
-                        "language_name": dict(node).get("language_name"),
-                        "date_start": dict(node).get("date_start"),
-                        "date_end": dict(node).get("date_end"),
-                        "definition": dict(node).get("definition_primary"),
-                    }
-                )
-
-            return {
-                "lsr_id": str(lsr_id),
-                "chain": chain,
-                "proto_form": chain[-1] if chain else None,
-                "depth": len(chain) - 1,
-            }
-
-    except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
-    except Exception as e:
-        logger.error(f"Etymology chain retrieval failed: {e}")
-        raise DatabaseError(message=f"Etymology chain retrieval failed: {e}") from e
+    return {
+        "lsr_id": str(lsr_id),
+        "chain": chain,
+        "proto_form": chain[-1] if complete else None,
+        "depth": len(chain) - 1,
+        "truncated": not complete,
+    }
 
 
 @router.get(
@@ -299,48 +353,15 @@ async def get_descendants(
     """
     logger.info(f"Fetching descendants for LSR: {lsr_id}, depth={depth}")
 
-    # Verify LSR exists
-    await repo.get_by_id(lsr_id)
+    await _require_lsr(repo, lsr_id)
 
-    query = f"""
-    MATCH (start:LSR {{id: $lsr_id}})<-[:DESCENDS_FROM*1..{depth}]-(descendant:LSR)
-    RETURN DISTINCT descendant
-    LIMIT 500
-    """
-
-    try:
-        async with repo.db.neo4j_session() as session:
-            result = await session.run(query, {"lsr_id": str(lsr_id)})
-            records = await result.fetch(500)
-
-            descendants = []
-            for record in records:
-                node = record["descendant"]
-                props = dict(node)
-                descendants.append(
-                    {
-                        "id": props.get("id"),
-                        "form": props.get("form_orthographic"),
-                        "language_code": props.get("language_code"),
-                        "language_name": props.get("language_name"),
-                        "date_start": props.get("date_start"),
-                        "date_end": props.get("date_end"),
-                        "definition": props.get("definition_primary"),
-                    }
-                )
-
-            return {
-                "lsr_id": str(lsr_id),
-                "descendants": descendants,
-                "count": len(descendants),
-                "depth": depth,
-            }
-
-    except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
-    except Exception as e:
-        logger.error(f"Descendant retrieval failed: {e}")
-        raise DatabaseError(message=f"Descendant retrieval failed: {e}") from e
+    descendants = await repo.get_descendants(lsr_id, depth=depth, limit=500)
+    return {
+        "lsr_id": str(lsr_id),
+        "descendants": descendants,
+        "count": len(descendants),
+        "depth": depth,
+    }
 
 
 @router.get(
@@ -354,60 +375,26 @@ async def get_cognates(
     """
     Get all cognate LSRs across languages.
 
-    Returns words in other languages that share a common ancestor
-    with this LSR.
+    Returns words in other languages that share a common DESCENDS_FROM
+    ancestor with this LSR, excluding its own ancestors and descendants,
+    plus any word linked to it by a COGNATE_OF relationship.
     """
     logger.info(f"Fetching cognates for LSR: {lsr_id}")
 
-    # Verify LSR exists
-    await repo.get_by_id(lsr_id)
+    await _require_lsr(repo, lsr_id)
 
-    # Find the proto-ancestor, then find all its descendants in other languages
-    query = """
-    MATCH (start:LSR {id: $lsr_id})-[:DESCENDS_FROM*0..]->(proto:LSR)
-    WHERE NOT (proto)-[:DESCENDS_FROM]->()
-    WITH proto
-    MATCH (proto)<-[:DESCENDS_FROM*1..]-(cognate:LSR)
-    WHERE cognate.id <> $lsr_id
-    RETURN DISTINCT cognate
-    LIMIT 100
-    """
+    cognates = await repo.get_cognates(lsr_id, limit=100)
+    by_language: dict[str, list] = {}
+    for entry in cognates:
+        by_language.setdefault(entry.get("language_code") or "unknown", []).append(entry)
 
-    try:
-        async with repo.db.neo4j_session() as session:
-            result = await session.run(query, {"lsr_id": str(lsr_id)})
-            records = await result.fetch(100)
-
-            cognates = []
-            by_language: dict[str, list] = {}
-            for record in records:
-                node = record["cognate"]
-                props = dict(node)
-                entry = {
-                    "id": props.get("id"),
-                    "form": props.get("form_orthographic"),
-                    "language_code": props.get("language_code"),
-                    "language_name": props.get("language_name"),
-                    "date_start": props.get("date_start"),
-                    "date_end": props.get("date_end"),
-                    "definition": props.get("definition_primary"),
-                }
-                cognates.append(entry)
-                lang = props.get("language_code", "unknown")
-                by_language.setdefault(lang, []).append(entry)
-
-            return {
-                "lsr_id": str(lsr_id),
-                "cognate_count": len(cognates),
-                "languages": list(by_language.keys()),
-                "by_language": by_language,
-            }
-
-    except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
-    except Exception as e:
-        logger.error(f"Cognate retrieval failed: {e}")
-        raise DatabaseError(message=f"Cognate retrieval failed: {e}") from e
+    return {
+        "lsr_id": str(lsr_id),
+        "cognates": cognates,
+        "cognate_count": len(cognates),
+        "languages": list(by_language.keys()),
+        "by_language": by_language,
+    }
 
 
 @router.get(
@@ -421,72 +408,17 @@ async def get_borrowings(
     """
     Get borrowing relationships for an LSR.
 
-    Returns both words this LSR borrowed from (loan_source)
-    and words that borrowed from this LSR (loan_targets).
+    Returns both words this LSR borrowed from (borrowed_from) and words
+    that borrowed from this LSR (borrowed_to), each with the confidence and
+    evidence recorded on the BORROWED_FROM relationship.
     """
     logger.info(f"Fetching borrowings for LSR: {lsr_id}")
 
-    # Verify LSR exists
-    await repo.get_by_id(lsr_id)
+    await _require_lsr(repo, lsr_id)
 
-    # Find what this word borrowed from
-    source_query = """
-    MATCH (l:LSR {id: $lsr_id})-[:BORROWED_FROM]->(donor:LSR)
-    RETURN donor
-    LIMIT 10
-    """
-
-    # Find what borrowed from this word
-    target_query = """
-    MATCH (l:LSR {id: $lsr_id})<-[:BORROWED_FROM]-(recipient:LSR)
-    RETURN recipient
-    LIMIT 100
-    """
-
-    try:
-        async with repo.db.neo4j_session() as session:
-            # Get loan sources (words this LSR borrowed from)
-            source_result = await session.run(source_query, {"lsr_id": str(lsr_id)})
-            source_records = await source_result.fetch(10)
-
-            borrowed_from = []
-            for record in source_records:
-                props = dict(record["donor"])
-                borrowed_from.append(
-                    {
-                        "id": props.get("id"),
-                        "form": props.get("form_orthographic"),
-                        "language_code": props.get("language_code"),
-                        "language_name": props.get("language_name"),
-                        "definition": props.get("definition_primary"),
-                    }
-                )
-
-            # Get loan targets (words that borrowed from this LSR)
-            target_result = await session.run(target_query, {"lsr_id": str(lsr_id)})
-            target_records = await target_result.fetch(100)
-
-            borrowed_to = []
-            for record in target_records:
-                props = dict(record["recipient"])
-                borrowed_to.append(
-                    {
-                        "id": props.get("id"),
-                        "form": props.get("form_orthographic"),
-                        "language_code": props.get("language_code"),
-                        "language_name": props.get("language_name"),
-                        "definition": props.get("definition_primary"),
-                    }
-                )
-
-            return {
-                "lsr_id": str(lsr_id),
-                "borrowed_from": borrowed_from,
-                "borrowed_to": borrowed_to,
-            }
-
-    except RuntimeError as e:
-        raise DatabaseError(message=f"Neo4j not connected: {e}") from e
-    except Exception as e:
-        logger.error(f"Borrowing retrieval failed: {e}")
-        raise DatabaseError(message=f"Borrowing retrieval failed: {e}") from e
+    borrowed_from, borrowed_to = await repo.get_borrowings(lsr_id)
+    return {
+        "lsr_id": str(lsr_id),
+        "borrowed_from": borrowed_from,
+        "borrowed_to": borrowed_to,
+    }

@@ -1,244 +1,122 @@
-# Contributing to Computational Linguistic Stratigraphy
+# Contributing to Lexicon
 
-Thank you for your interest in contributing to this project! We welcome contributions from the community and are grateful for any help you can provide.
+Bug reports, fixes, new data sources and documentation corrections are
+welcome. Open an issue before large changes (a new analysis, a change to the
+data model) so the approach can be agreed first.
 
-## Table of Contents
+## Setup
 
-- [Getting Started](#getting-started)
-- [Development Setup](#development-setup)
-- [Code Style](#code-style)
-- [Testing](#testing)
-- [Submitting Changes](#submitting-changes)
-- [Pull Request Process](#pull-request-process)
-- [Reporting Bugs](#reporting-bugs)
-- [Requesting Features](#requesting-features)
-- [Architecture Decisions](#architecture-decisions)
-
-## Getting Started
-
-1. Fork the repository on GitHub
-2. Clone your fork locally:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/Lexicon.git
-   cd Lexicon
-   ```
-3. Add the upstream repository as a remote:
-   ```bash
-   git remote add upstream https://github.com/kase1111-hash/Lexicon.git
-   ```
-4. Create a branch for your changes:
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-
-## Development Setup
-
-### Prerequisites
-
-- Python 3.11 or higher
-- Docker and Docker Compose
-- 16GB+ RAM recommended
-
-### Installation
-
-1. Copy the environment template and configure:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your settings
-   ```
-
-2. Start the required services:
-   ```bash
-   docker compose up -d
-   ```
-
-3. Create a virtual environment and install dependencies:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   make install-dev
-   ```
-
-4. Initialize the databases:
-   ```bash
-   ./scripts/setup_databases.sh
-   ```
-
-5. Install pre-commit hooks:
-   ```bash
-   pre-commit install
-   ```
-
-## Code Style
-
-We maintain consistent code style through automated tooling:
-
-- **Python Version**: 3.11+
-- **Type Hints**: Required for all public functions and methods
-- **Formatter**: [Black](https://github.com/psf/black) with 100 character line length
-- **Linter**: [Ruff](https://github.com/astral-sh/ruff) for fast Python linting
-- **Type Checker**: [mypy](https://mypy.readthedocs.io/) in strict mode
-
-### Running Code Quality Checks
+You need Python 3.11 or 3.12 (CI tests both) and Docker for the database
+tests.
 
 ```bash
-# Format code
-make format
-
-# Run linter
-make lint
-
-# Run type checker
-make type-check
-
-# Run security scan
-make security-check
-
-# Run all checks
-make pre-commit
+git clone https://github.com/kase1111-hash/Lexicon.git
+cd Lexicon
+python -m venv .venv
+. .venv/bin/activate
+make install-dev
 ```
 
-See [docs/style-guide.md](docs/style-guide.md) for detailed style guidelines.
+`make install-dev` installs `requirements-dev.txt` (the pinned runtime
+dependencies plus the test and lint tools), installs the package in editable
+mode, which provides the `lexicon`, `ls-api` and `ls-ingest` commands, and
+installs the pre-commit hook. Only the PostgreSQL migrations need more
+(`pip install -e '.[postgres]'`).
 
-## Testing
+To run Lexicon itself against your changes, follow the quickstart in the
+[README](README.md). [docs/architecture.md](docs/architecture.md) explains
+where things live.
 
-We use [pytest](https://pytest.org/) for testing with a minimum coverage requirement of 80%.
-
-### Running Tests
+## Tests
 
 ```bash
-# Run all tests
 make test
-
-# Run unit tests only
-make test-unit
-
-# Run integration tests
-make test-integration
-
-# Run with coverage report
-make test-cov
-
-# Run specific test file
-pytest tests/unit/test_specific.py
-
-# Run tests with specific marker
-pytest -m "not slow"
 ```
 
-### Test Categories
+runs the whole suite without any database. `tests/conftest.py` ignores your
+`.env` and points Neo4j, Elasticsearch, Redis and PostgreSQL at unreachable
+addresses, so tests that need a database skip themselves; the rest take
+about half a minute.
 
-- **Unit Tests** (`tests/unit/`): Test individual components in isolation
-- **Integration Tests** (`tests/integration/`): Test component interactions
-- **Acceptance Tests** (`tests/acceptance/`): Test user workflows
-- **Performance Tests** (`tests/performance/`): Load and stress testing
-- **Security Tests** (`tests/security/`): Security-focused testing
+The database tests create and delete nodes. Give them a throwaway Neo4j,
+never the one holding your graph:
 
-### Writing Tests
-
-- Write tests for all new functionality
-- Follow the Arrange-Act-Assert pattern
-- Use descriptive test names that explain what is being tested
-- Use fixtures for common setup (see `tests/conftest.py`)
-
-## Submitting Changes
-
-### Commit Messages
-
-Write clear, concise commit messages:
-
-- Use the present tense ("Add feature" not "Added feature")
-- Use the imperative mood ("Move cursor to..." not "Moves cursor to...")
-- Limit the first line to 72 characters
-- Reference issues and pull requests when relevant
-
-Example:
-```
-Add semantic drift analysis for Indo-European languages
-
-- Implement DriftAnalyzer class with configurable time windows
-- Add support for cognate-based drift detection
-- Include unit tests for drift calculation methods
-
-Fixes #123
+```bash
+make test-db-start   # neo4j:5.9 in container lexicon-test-neo4j on localhost:7688
+make test-db         # the whole suite with TEST_NEO4J_URI=bolt://localhost:7688
+make test-db-stop
 ```
 
-### Before Submitting
+`TEST_NEO4J_PORT`, `TEST_NEO4J_PASSWORD` and `TEST_NEO4J_CONTAINER` change the
+defaults, for example `make test-db-start TEST_NEO4J_PORT=7782` followed by
+`make test-db TEST_NEO4J_PORT=7782`. The `TEST_*` variables are the only way
+tests reach a database (see [config/README.md](config/README.md)).
 
-1. Ensure all tests pass: `make test`
-2. Run code quality checks: `make lint && make type-check`
-3. Update documentation if needed
-4. Add or update tests for your changes
+| Directory | Contents |
+|---|---|
+| `tests/unit/` | Single modules |
+| `tests/integration/` | API, pipeline and ingestion tests; the live ones need `TEST_NEO4J_URI` |
+| `tests/acceptance/` | User workflows end to end |
+| `tests/regression/` | Edge cases and fixed bugs |
+| `tests/security/` | Input validation, secrets handling, unsafe code patterns |
+| `tests/performance/` | Timing assertions; CI runs them but does not fail on them |
 
-## Pull Request Process
+`make test-cov` writes a coverage report to `htmlcov/`.
 
-1. Update the README.md or relevant documentation with details of changes if applicable
-2. Add any new dependencies to `requirements.txt` or `pyproject.toml`
-3. Ensure your PR description clearly describes the problem and solution
-4. Link any related issues in your PR description
-5. Request review from maintainers
+## Checks CI runs
 
-### PR Requirements
+Every push and pull request to `main` or `develop` runs
+`.github/workflows/ci.yml`. Run the same checks locally before opening a pull
+request:
 
-- All CI checks must pass
-- Code review approval required
-- Documentation updated (if applicable)
-- Tests added/updated (if applicable)
+| CI job | Checks | Locally |
+|---|---|---|
+| Lint | `ruff check src tests`, `black src tests --check` | `make lint`, `make format-check` |
+| Type Check | `mypy src` (strict settings in `pyproject.toml`) | `make type-check` |
+| Security Scan | `bandit -r src -c pyproject.toml`, `pip-audit -r requirements.txt` | `make security-check`, `make audit` |
+| Test (3.11, 3.12) | `pytest tests/ --ignore=tests/performance` without databases | `make test` |
+| Test with Neo4j | The same against a Neo4j 5.9 service | `make test-db` |
+| Test Coverage | Fails below `fail_under` in `pyproject.toml`, currently 69% | `make test-cov` |
+| Docker Image | Builds the image and imports the API, CLI and ingestion modules in it | |
+| Build Package | `python -m build` | |
 
-## Reporting Bugs
+`make pre-commit` runs the hooks from `.pre-commit-config.yaml` (whitespace,
+YAML/JSON/TOML syntax, black, ruff, bandit, mypy) on every file; the installed
+hook runs them on the files you commit. The black, ruff, mypy and bandit
+versions are pinned in `requirements-dev.txt` and match CI and the hooks.
 
-When reporting bugs, please include:
+## Code
 
-1. **Description**: A clear and concise description of the bug
-2. **Steps to Reproduce**: Detailed steps to reproduce the behavior
-3. **Expected Behavior**: What you expected to happen
-4. **Actual Behavior**: What actually happened
-5. **Environment**:
-   - Python version
-   - Operating system
-   - Docker version (if applicable)
-   - Relevant dependency versions
-6. **Logs/Screenshots**: Any relevant logs or screenshots
+- Format with black (line length 100) and keep ruff clean. mypy requires type
+  hints on every function.
+- Follow [docs/style-guide.md](docs/style-guide.md).
+- Database failures must reach the caller as `DatabaseError` (HTTP 503), not
+  as an empty result. Analyses must report coverage and return
+  `insufficient_data` rather than a verdict the data cannot support.
+- New sources are `SourceAdapter` subclasses; the
+  [FAQ](docs/faq.md#how-do-i-add-a-source) shows one.
+- Changes to the LSR fields or relationship types go in
+  [docs/data_model.md](docs/data_model.md). The Neo4j constraints and indexes
+  are created by `LSRRepository.ensure_schema()`, which must stay idempotent;
+  there is no migration tool for the graph (the alembic migrations are for
+  the optional PostgreSQL only).
+- Add tests with every change, and never point them at a database that holds
+  data you want to keep.
 
-Use the [bug report template](.github/ISSUE_TEMPLATE/bug_report.md) when creating issues.
+## Documentation
 
-## Requesting Features
+Keep documentation to what the code does now. Command examples and API
+responses in the docs must come from a real run; shorten long output with
+`…`, but do not invent fields or values. Say plainly what does not work.
 
-Feature requests are welcome! Please:
+## Pull requests
 
-1. Check existing issues to avoid duplicates
-2. Clearly describe the use case and motivation
-3. Explain how the feature fits the project's goals
-4. Consider offering to implement the feature yourself
+1. Branch from `main`, keep the change focused, and write commit messages in
+   the imperative ("Add corpus sidecar validation").
+2. Run the checks above and update the documentation your change affects,
+   including [CHANGELOG.md](CHANGELOG.md) under `Unreleased`.
+3. Open the pull request with the template and link the issue it addresses.
 
-Use the [feature request template](.github/ISSUE_TEMPLATE/feature_request.md) when creating issues.
-
-## Architecture Decisions
-
-For significant changes that affect the project architecture:
-
-1. Open an issue to discuss the change before implementing
-2. Document the decision using the following template:
-   - **Context**: What is the issue or need?
-   - **Options Considered**: What alternatives were evaluated?
-   - **Decision**: What was decided and why?
-   - **Consequences**: What are the trade-offs?
-
-### Data Model Changes
-
-Changes to the LSR schema or graph model require:
-
-1. Migration script for existing data
-2. Version bump (following semantic versioning)
-3. API compatibility consideration
-4. Documentation update
-
-## Questions?
-
-If you have questions about contributing:
-
-- Check the [FAQ](docs/faq.md)
-- Review the [Troubleshooting Guide](docs/troubleshooting.md)
-- Open a discussion on GitHub
-
-Thank you for contributing!
+Report bugs and request features with the
+[issue templates](https://github.com/kase1111-hash/Lexicon/issues/new/choose).
+Security problems go through [SECURITY.md](SECURITY.md), not public issues.

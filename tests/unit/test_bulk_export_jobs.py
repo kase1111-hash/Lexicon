@@ -53,14 +53,24 @@ class FakeResult:
     async def fetch(self, n):
         return self._records[:n]
 
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        for record in self._records:
+            yield record
+
 
 class FakeSession:
+    """Answers each query with the records of the first marker it contains."""
+
     def __init__(self, records_by_marker):
         self._records_by_marker = records_by_marker
 
     async def run(self, query, params=None):
+        text = getattr(query, "text", query)  # str or neo4j.Query
         for marker, records in self._records_by_marker.items():
-            if marker in query:
+            if marker in text:
                 return FakeResult(records)
         return FakeResult([])
 
@@ -90,12 +100,13 @@ def client(monkeypatch):
 
     fake_db = FakeDB(
         {
+            "count(l) AS total": [{"total": 2}],
             "MATCH (l:LSR {language_code: $lang})": [
                 {"l": {"id": "1", "form_orthographic": "water", "language_code": "eng"}},
                 {"l": {"id": "2", "form_orthographic": "fire", "language_code": "eng"}},
             ],
             "type(r) AS type": [
-                {"source": "1", "type": "COGNATE_OF", "target": "2"},
+                {"source": "1", "type": "COGNATE_OF", "target": "2", "properties": {}},
             ],
         }
     )
@@ -123,7 +134,10 @@ class TestBulkExportRoutes:
         assert data["status"] == "completed"
         assert data["count"] == 2
         assert [item["form_orthographic"] for item in data["items"]] == ["water", "fire"]
-        assert data["relationships"] == [{"source": "1", "type": "COGNATE_OF", "target": "2"}]
+        assert data["total"] == 2 and data["truncated"] is False
+        assert data["relationships"] == [
+            {"source": "1", "type": "COGNATE_OF", "target": "2", "properties": {}}
+        ]
 
     def test_sync_export_csv(self, client):
         response = client.post(
@@ -175,8 +189,8 @@ class TestBulkExportRoutes:
 
     def test_status_unknown_job(self, client):
         response = client.get("/api/v1/graph/bulk/status/does-not-exist")
-        assert response.status_code == 200
-        assert response.json()["status"] == "not_found"
+        assert response.status_code == 404
+        assert response.json()["error"] == "NOT_FOUND"
 
     def test_result_unknown_job_404(self, client):
         response = client.get("/api/v1/graph/bulk/result/does-not-exist")

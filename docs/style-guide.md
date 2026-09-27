@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the coding standards and conventions for the Linguistic Stratigraphy project. All contributors must follow these guidelines to maintain code consistency and quality.
+This document defines the coding standards and conventions for Lexicon. All contributors must follow these guidelines to maintain code consistency and quality.
 
 ## Python Version
 
@@ -129,8 +129,8 @@ def calculate_similarity(entry1: LSR, entry2: LSR) -> float:
         ValueError: If either LSR has no language_code.
 
     Example:
-        >>> lsr1 = LSR(form="water", language_code="eng")
-        >>> lsr2 = LSR(form="wasser", language_code="deu")
+        >>> lsr1 = LSR(form_orthographic="water", language_code="eng")
+        >>> lsr2 = LSR(form_orthographic="Wasser", language_code="deu")
         >>> score = calculate_similarity(lsr1, lsr2)
         >>> print(f"Similarity: {score:.2f}")
     """
@@ -199,12 +199,12 @@ from src.models.lsr import *
 - Don't catch exceptions silently
 
 ```python
-# Good
-def get_lsr(lsr_id: UUID) -> LSR:
-    result = db.query(lsr_id)
-    if result is None:
-        raise ValueError(f"LSR not found: {lsr_id}")
-    return result
+# Good: a LexiconError subclass from src/exceptions.py; the API maps its
+# code and HTTP status (here LSR_NOT_FOUND, 404) into the error response
+async def get_lsr(repo: LSRRepository, lsr_id: UUID) -> LSR:
+    if not await repo.exists(lsr_id):
+        raise LSRNotFoundError(lsr_id=str(lsr_id))
+    return await repo.get_by_id(lsr_id)
 
 # Bad
 def get_lsr(lsr_id):
@@ -241,8 +241,8 @@ print(f"Processing {len(entries)} entries")
 # Good
 async def fetch_all_entries(ids: list[UUID]) -> list[LSR]:
     async with DatabaseManager() as db:
-        tasks = [db.get_lsr(id) for id in ids]
-        return await asyncio.gather(*tasks)
+        repo = LSRRepository(db)
+        return await asyncio.gather(*(repo.get_by_id(lsr_id) for lsr_id in ids))
 
 # Bad
 def fetch_all_entries(ids):
@@ -298,26 +298,28 @@ def test_lsr_normalize_form(sample_lsr):
 
 ## Data Classes and Models
 
-### Use Dataclasses
-- Prefer `@dataclass` for simple data containers
+### Pydantic Models and Dataclasses
+- Use Pydantic models for records that are validated or serialized: `LSR`
+  (`src/models/lsr.py`) and the API request models (`src/utils/validation.py`)
+- Use `@dataclass` for plain internal results, such as the analysis results
+  in `src/analysis/`
 - Use `field(default_factory=...)` for mutable defaults
 
 ```python
 from dataclasses import dataclass, field
-from uuid import UUID, uuid4
 
 @dataclass
-class LSR:
-    id: UUID = field(default_factory=uuid4)
-    form_orthographic: str = ""
-    attestations: list[Attestation] = field(default_factory=list)
+class AnachronismAnalysis:
+    anachronisms: list[dict] = field(default_factory=list)
+    verdict: str = "insufficient_data"
+    confidence: float = 0.0
 ```
 
 ### Use Enums for Fixed Values
 ```python
-from enum import Enum
+from enum import StrEnum
 
-class RelationshipType(str, Enum):
+class RelationshipType(StrEnum):
     DESCENDS_FROM = "DESCENDS_FROM"
     BORROWED_FROM = "BORROWED_FROM"
     COGNATE_OF = "COGNATE_OF"
@@ -327,25 +329,29 @@ class RelationshipType(str, Enum):
 
 This project uses the following configuration:
 
-- `pyproject.toml` - Project metadata, dependencies, tool configs
+- `pyproject.toml` - Project metadata, dependencies, and the Black, Ruff, mypy, Bandit and coverage configuration
+- `pytest.ini` - pytest configuration
 - `.python-version` - Python version specification
-- `ruff.toml` - Ruff linter configuration
 - `.editorconfig` - Editor settings
+- `.pre-commit-config.yaml` - Pre-commit hooks
 
 ## Pre-commit Hooks
 
 All contributors should install pre-commit hooks:
 
 ```bash
-pip install pre-commit
+pip install -r requirements-dev.txt
 pre-commit install
 ```
 
 Hooks run automatically on commit:
-1. Black (formatting)
-2. Ruff (linting)
-3. mypy (type checking)
-4. pytest (unit tests)
+1. File checks (trailing whitespace, end of file, YAML/JSON/TOML syntax, large files, merge conflicts, private keys)
+2. Black (formatting)
+3. Ruff (linting, with `--fix`)
+4. Bandit (security checks, everything except `tests/`)
+5. mypy (type checking, `mypy src`)
+
+The hooks do not run the tests; run `pytest` yourself before committing.
 
 ## Git Conventions
 

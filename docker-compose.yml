@@ -1,15 +1,30 @@
-version: '3.8'
+# Lexicon services. Quick start:
+#   cp .env.example .env        # set the passwords
+#   docker compose up -d        # neo4j, elasticsearch, redis and the api
+#   curl http://localhost:8000/health
+# Only Neo4j is required; the API starts without waiting for Elasticsearch and
+# Redis and connects to them when they come up. PostgreSQL is optional and
+# reserved for future use: `docker compose --profile postgres up -d`.
+# Every port is published on 127.0.0.1 only.
 
 services:
-  # Graph Database
+  # Graph Database (required)
   neo4j:
     image: neo4j:5.9
     container_name: ls-neo4j
     environment:
-      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}
-      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
-      - NEO4J_dbms_memory_heap_initial__size=512m
-      - NEO4J_dbms_memory_heap_max__size=2G
+      # The image's admin user is always neo4j (it refuses to start with any
+      # other), so NEO4J_USER from the env file does not apply here
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4J_server_memory_pagecache_size=512m
+      # Bound runaway queries server-wide (the raw /api/v1/graph/query endpoint
+      # sets its own shorter timeout, but Neo4j checks timeouts only between
+      # units of work, so the memory limits are the backstop)
+      - NEO4J_db_transaction_timeout=120s
+      - NEO4J_db_memory_transaction_max=256m
+      - NEO4J_db_memory_transaction_total_max=512m
     ports:
       - "127.0.0.1:7474:7474"  # HTTP (localhost only)
       - "127.0.0.1:7687:7687"  # Bolt (localhost only)
@@ -17,36 +32,43 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7474"]
-      interval: 30s
+      # The neo4j image ships wget, not curl
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
       timeout: 10s
-      retries: 5
+      retries: 10
+      start_period: 30s
     networks:
       - ls-network
     deploy:
       resources:
         limits:
           cpus: '2.0'
-          memory: 3G
+          memory: 2G
         reservations:
           cpus: '0.5'
           memory: 1G
 
-  # Relational Database
+  # Relational Database: optional, reserved for future use (no code reads or
+  # writes it yet). Started only with the "postgres" profile; the schema comes
+  # from alembic (make db-migrate), not from an init script.
   postgres:
     image: postgres:15
     container_name: ls-postgres
+    profiles: ["postgres"]
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-linguistic_stratigraphy}
       - POSTGRES_USER=${POSTGRES_USER:-ls_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      # No `:?` here: the file must render without it when the profile is off
+      # (the postgres image itself refuses to start with an empty password)
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
     ports:
       - "127.0.0.1:5432:5432"  # localhost only
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ls_user} -d ${POSTGRES_DB:-linguistic_stratigraphy}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -61,27 +83,35 @@ services:
           cpus: '0.25'
           memory: 256M
 
-  # Full-text Search
+  # Full-text Search (optional: search falls back to Neo4j)
   elasticsearch:
     image: elasticsearch:8.9.0
     container_name: ls-elasticsearch
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=true
-      - xpack.security.http.ssl.enabled=false      # SSL disabled for local dev; enabled in production overlay
-      - xpack.security.transport.ssl.enabled=false  # SSL disabled for local dev; enabled in production overlay
+      # TLS stays off: Elasticsearch is reachable only on the internal network
+      # and 127.0.0.1 (see config/README.md for TLS at a reverse proxy)
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
       - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD is required}
       - "ES_JAVA_OPTS=-Xms512m -Xmx1g"
+      # Absolute disk watermarks: the percentage defaults leave the index
+      # unassigned (search falls back to Neo4j) on any disk over 90% full
+      - cluster.routing.allocation.disk.watermark.low=2gb
+      - cluster.routing.allocation.disk.watermark.high=1gb
+      - cluster.routing.allocation.disk.watermark.flood_stage=512mb
     ports:
       - "127.0.0.1:9200:9200"  # localhost only
       - "127.0.0.1:9300:9300"  # localhost only
     volumes:
       - es_data:/usr/share/elasticsearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f -u elastic:${ELASTICSEARCH_PASSWORD} http://localhost:9200/_cluster/health || exit 1"]
-      interval: 30s
+      test: ["CMD-SHELL", "curl -fsS -u \"elastic:$$ELASTIC_PASSWORD\" http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
       timeout: 10s
-      retries: 5
+      retries: 10
+      start_period: 30s
     networks:
       - ls-network
     deploy:
@@ -93,17 +123,20 @@ services:
           cpus: '0.5'
           memory: 1G
 
-  # Cache
+  # Cache (optional)
   redis:
     image: redis:7-alpine
     container_name: ls-redis
-    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    # List form so the password is passed verbatim, whatever its characters
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
+    environment:
+      - REDISCLI_AUTH=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     ports:
       - "127.0.0.1:6379:6379"  # localhost only
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -125,27 +158,47 @@ services:
       dockerfile: Dockerfile
     container_name: ls-api
     environment:
+      # The bundled Neo4j, whose user is always neo4j
       - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}
-      - POSTGRES_URI=postgresql://${POSTGRES_USER:-ls_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres/${POSTGRES_DB:-linguistic_stratigraphy}
-      - ELASTICSEARCH_URI=http://elastic:${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD is required}@elasticsearch:9200
-      - REDIS_URI=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+      # The code builds the URIs and URL-encodes the passwords
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:?ELASTICSEARCH_PASSWORD is required}
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      # No POSTGRES_URI: the API does not use PostgreSQL yet, so /health
+      # reports it as not_configured
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - API_KEY=${API_KEY:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://localhost:8080}
+      # More settings from the env file (.env or --env-file), which the
+      # container never reads itself; empty means the code's default
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-}
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-}
+      - RATE_LIMIT_WINDOW_SECONDS=${RATE_LIMIT_WINDOW_SECONDS:-}
+      - SLOW_REQUEST_THRESHOLD_MS=${SLOW_REQUEST_THRESHOLD_MS:-}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      # false turns off POST /api/v1/graph/query (arbitrary read-only Cypher)
+      - GRAPH_QUERY_ENABLED=${GRAPH_QUERY_ENABLED:-}
+      # Empty: the version of the code in the image
+      - APP_VERSION=${APP_VERSION:-}
+      # Peers whose X-Forwarded-For uvicorn trusts as the client address (the
+      # rate limit counts per client address); see docker-compose.production.yml
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-127.0.0.1}
     ports:
-      - "8000:8000"
-    volumes:
-      - ./src:/app/src:ro
+      - "127.0.0.1:8000:8000"  # localhost only (authentication is off without API_KEY)
     depends_on:
       neo4j:
         condition: service_healthy
-      postgres:
-        condition: service_healthy
+      # Optional stores: the API does not wait for them and connects once
+      # they answer; `required: false` keeps a failed one from blocking it
       elasticsearch:
-        condition: service_healthy
+        condition: service_started
+        required: false
       redis:
-        condition: service_healthy
+        condition: service_started
+        required: false
     networks:
       - ls-network
     restart: unless-stopped

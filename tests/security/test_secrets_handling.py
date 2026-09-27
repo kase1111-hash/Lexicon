@@ -6,9 +6,8 @@ and tokens are properly protected and not exposed.
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from src.config import (
     APIConfig,
@@ -18,6 +17,9 @@ from src.config import (
     get_settings,
     reload_settings,
 )
+
+# Resolve files relative to this checkout, not a machine-specific path
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class TestSecretsMasking:
@@ -60,16 +62,16 @@ class TestSecretsMasking:
         # Password should not appear in string output
         assert "super_secret_password_123" not in str_output
 
-    def test_jwt_secret_not_in_repr(self):
-        """Test that JWT secret is not exposed in repr."""
+    def test_api_key_not_in_repr(self):
+        """Test that the API key is not exposed in repr."""
         config = APIConfig(
-            jwt_secret="my_super_secret_jwt_12345",
+            api_key="my_super_secret_api_key_12345",
         )
 
         repr_str = repr(config)
 
-        # JWT secret should not appear in repr
-        assert "my_super_secret_jwt_12345" not in repr_str
+        # API key should not appear in repr
+        assert "my_super_secret_api_key_12345" not in repr_str
 
     def test_sentry_dsn_masked(self):
         """Test that Sentry DSN (contains token) is masked."""
@@ -158,24 +160,22 @@ class TestConfigurationFileSecurity:
 
     def test_env_example_has_no_real_secrets(self):
         """Test that .env.example doesn't contain real secrets."""
-        env_example_path = "/home/user/Lexicon/.env.example"
+        env_files = [REPO_ROOT / ".env.example", *sorted((REPO_ROOT / "config").glob(".env.*"))]
+        assert (REPO_ROOT / ".env.example").is_file()
 
-        try:
-            with open(env_example_path) as f:
-                content = f.read()
-
+        checked = 0
+        for env_file in env_files:
             # Should not contain what looks like real secrets
-            lines = content.split("\n")
-            for line in lines:
+            for line in env_file.read_text().splitlines():
                 if "=" in line and not line.startswith("#"):
                     key, _, value = line.partition("=")
                     value = value.strip().strip('"').strip("'")
+                    checked += 1
 
                     # Values should be placeholders, not real secrets
                     if "password" in key.lower() or "secret" in key.lower() or "key" in key.lower():
                         # Should be empty, placeholder, example, or known default
-                        # "minioadmin" is MinIO's default admin credential (not a real secret)
-                        known_defaults = ["minioadmin", "admin", "test", "dev"]
+                        known_defaults = ["admin", "test", "dev"]
                         assert (
                             value in ["", "your-secret-here", "change-me", "xxx"]
                             or "example" in value.lower()
@@ -183,17 +183,12 @@ class TestConfigurationFileSecurity:
                             or "change" in value.lower()
                             or value.lower() in known_defaults
                             or len(value) < 5
-                        ), f"Potential secret in .env.example: {key}={value}"
-
-        except FileNotFoundError:
-            pytest.skip(".env.example not found")
+                        ), f"Potential secret in {env_file.name}: {key}={value}"
+        assert checked, "no settings found in the env templates"
 
     def test_no_hardcoded_secrets_in_config(self):
         """Test that config.py doesn't have hardcoded secrets."""
-        config_path = "/home/user/Lexicon/src/config.py"
-
-        with open(config_path) as f:
-            content = f.read()
+        content = (REPO_ROOT / "src" / "config.py").read_text()
 
         # Should not contain hardcoded secret-looking values
         suspicious_patterns = [
@@ -239,19 +234,13 @@ class TestAPISecurityHeaders:
 class TestTokenSecurity:
     """Test security of token handling."""
 
-    def test_jwt_secret_minimum_length(self):
-        """Test that JWT secret has minimum length requirement consideration."""
-        # Short keys should ideally be flagged for production
-        settings = Settings()
+    def test_api_key_required_in_production(self):
+        """Production validation insists on an API key."""
+        with patch.dict(os.environ, {"ENVIRONMENT": "production"}):
+            os.environ.pop("API_KEY", None)
+            errors = Settings(_env_file=None).validate_required_for_production()
 
-        # Verify jwt_secret field exists
-        assert hasattr(settings.api, "jwt_secret")
-
-        # Production validation should catch issues
-        errors = settings.validate_required_for_production()
-
-        # Validation runs without crashing
-        assert isinstance(errors, list)
+        assert "API_KEY is required in production" in errors
 
     def test_sentry_dsn_format_validated(self):
         """Test that Sentry DSN is stored as SecretStr for security."""

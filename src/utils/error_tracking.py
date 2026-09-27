@@ -15,6 +15,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from src import __version__
 from src.utils.logging import get_logger, get_request_id
 
 logger = get_logger(__name__)
@@ -68,7 +69,12 @@ class SentryIntegration:
             from sentry_sdk.integrations.fastapi import FastApiIntegration
             from sentry_sdk.integrations.logging import LoggingIntegration
             from sentry_sdk.integrations.starlette import StarletteIntegration
+            from sentry_sdk.integrations.strawberry import StrawberryIntegration
+        except ImportError:
+            logger.warning("sentry-sdk not installed, Sentry integration disabled")
+            return False
 
+        try:
             cls._sdk_available = True
 
             # Configure logging integration to capture errors and above
@@ -80,12 +86,14 @@ class SentryIntegration:
             sentry_sdk.init(
                 dsn=dsn,
                 environment=environment or os.getenv("ENVIRONMENT", "development"),
-                release=release or os.getenv("APP_VERSION", "0.1.0"),
+                # compose passes APP_VERSION empty unless set: use the code's version
+                release=release or os.getenv("APP_VERSION") or __version__,
                 traces_sample_rate=traces_sample_rate if enable_tracing else 0.0,
                 profiles_sample_rate=profiles_sample_rate if enable_tracing else 0.0,
                 integrations=[
                     StarletteIntegration(),
                     FastApiIntegration(),
+                    StrawberryIntegration(async_execution=True),
                     logging_integration,
                 ],
                 # Don't send PII by default
@@ -100,9 +108,6 @@ class SentryIntegration:
             logger.info(f"Sentry initialized for environment: {environment or 'development'}")
             return True
 
-        except ImportError:
-            logger.warning("sentry-sdk not installed, Sentry integration disabled")
-            return False
         except Exception as e:
             logger.error(f"Failed to initialize Sentry: {e}")
             return False

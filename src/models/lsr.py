@@ -1,5 +1,6 @@
 """Lexical State Record (LSR) model - core data unit for the linguistic graph."""
 
+import warnings
 from datetime import datetime
 from enum import StrEnum
 from typing import Self
@@ -8,6 +9,11 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from src.utils.phonetics import PhoneticUtils
+
+# Years an LSR can hold (negative for BCE). Sources that report a year
+# outside this range must drop it rather than store it.
+YEAR_MIN = -10000
+YEAR_MAX = 2100
 
 
 class DateSource(StrEnum):
@@ -38,8 +44,8 @@ class Attestation(BaseModel):
     text_source: str = ""
     text_date: int | None = Field(
         default=None,
-        ge=-10000,
-        le=2100,
+        ge=YEAR_MIN,
+        le=YEAR_MAX,
         description="Attestation year (negative for BCE, must be between -10000 and 2100)",
     )
     text_date_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -47,6 +53,13 @@ class Attestation(BaseModel):
     url: str | None = None
 
     model_config = {"frozen": False, "extra": "forbid"}
+
+
+# `register` (usage register) is a stored field name; it shadows
+# BaseModel.register (from the ABC metaclass), which LSR never uses
+warnings.filterwarnings(
+    "ignore", message='Field name "register" in "LSR" shadows', category=UserWarning
+)
 
 
 class LSR(BaseModel):
@@ -76,14 +89,14 @@ class LSR(BaseModel):
     period_label: str = Field(default="", description="e.g., 'Middle English'")
     date_start: int | None = Field(
         default=None,
-        ge=-10000,
-        le=2100,
+        ge=YEAR_MIN,
+        le=YEAR_MAX,
         description="Start year (negative for BCE, must be between -10000 and 2100)",
     )
     date_end: int | None = Field(
         default=None,
-        ge=-10000,
-        le=2100,
+        ge=YEAR_MIN,
+        le=YEAR_MAX,
         description="End year (must be between -10000 and 2100)",
     )
     date_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -97,6 +110,7 @@ class LSR(BaseModel):
     definition_primary: str = Field(default="", description="Main gloss")
     definitions_alternate: list[str] = Field(default_factory=list)
     conceptual_domain: list[str] = Field(default_factory=list, description="High-level categories")
+    etymology_text: str = Field(default="", description="Source etymology, as ingested")
 
     # Usage
     register: Register | None = None
@@ -121,7 +135,9 @@ class LSR(BaseModel):
     human_validated: bool = False
     validation_notes: str = ""
 
-    model_config = {"frozen": False, "extra": "forbid"}
+    # Assignments are validated too, so a year outside the range cannot be
+    # set after construction
+    model_config = {"frozen": False, "extra": "forbid", "validate_assignment": True}
 
     @field_validator("date_end")
     @classmethod
@@ -199,10 +215,13 @@ class LSR(BaseModel):
             if att.id not in existing_ids:
                 self.attestations.append(att)
 
-        # Expand date range
+        # Expand date range (the earliest date brings its confidence and
+        # label with it, so an undated record's label never sits on a date)
         if other.date_start is not None:
             if self.date_start is None or other.date_start < self.date_start:
                 self.date_start = other.date_start
+                self.date_confidence = other.date_confidence
+                self.period_label = other.period_label
         if other.date_end is not None:
             if self.date_end is None or other.date_end > self.date_end:
                 self.date_end = other.date_end

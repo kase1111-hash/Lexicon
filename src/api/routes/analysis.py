@@ -1,19 +1,31 @@
-"""Analysis API routes for text dating, anachronism detection, and semantic analysis."""
+"""Analysis API routes for text dating, anachronism detection, and semantic analysis.
+
+Every response carries enough context to judge it: a ``status`` or verdict
+of ``insufficient_data`` when the graph has too little dated vocabulary,
+plus coverage counts. Database outages surface as HTTP 503.
+"""
 
 import logging
 
 from fastapi import APIRouter, Depends, Query
 
 from src.analysis.contact_detection import ContactDetector
+from src.analysis.data_access import (
+    load_borrowings,
+    load_trajectory,
+    load_vocabulary_for_text,
+)
 from src.analysis.dating import TextDating
-from src.analysis.semantic_drift import SemanticDriftAnalyzer
+from src.analysis.semantic_drift import SemanticDriftAnalyzer, assess_trajectory, drift_report
 from src.exceptions import InvalidDateRangeError, InvalidLanguageCodeError, ValidationError
 from src.models import ErrorResponse
 from src.utils.db import DatabaseManager, get_db
 from src.utils.validation import (
+    YEAR_MAX,
+    YEAR_MIN,
     AnachronismRequest,
     DateTextRequest,
-    sanitize_iso_code,
+    normalize_language_code,
     sanitize_string,
 )
 
@@ -22,147 +34,50 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _build_lsr_lookup(db: DatabaseManager, language: str) -> dict[str, dict]:
-    """Build a word-form -> LSR data lookup from Neo4j for the analysis modules.
-
-    Returns a dict mapping normalized forms to their attestation data:
-        {"water": {"date_start": 1200, "date_end": 2024, "language_code": "eng"}, ...}
-    """
-    lookup: dict[str, dict] = {}
+def _language_param(value: str) -> str:
+    """Validate a language query parameter (ISO 639-3, or common 639-1)."""
     try:
-        async with db.neo4j_session() as session:
-            result = await session.run(
-                """
-                MATCH (l:LSR {language_code: $lang})
-                RETURN l.form_normalized AS form,
-                       l.date_start AS date_start,
-                       l.date_end AS date_end,
-                       l.language_code AS language_code,
-                       l.definition_primary AS definition
-                """,
-                {"lang": language},
-            )
-            records = await result.fetch(50000)
-            for record in records:
-                form = record["form"]
-                if form:
-                    lookup[form] = {
-                        "date_start": record["date_start"],
-                        "date_end": record["date_end"],
-                        "language_code": record["language_code"],
-                        "definition": record["definition"],
-                    }
-    except Exception as e:
-        logger.warning(f"Could not load LSR lookup from Neo4j: {e}")
-    return lookup
-
-
-async def _build_borrowing_data(db: DatabaseManager, language: str) -> list[dict]:
-    """Load borrowing relationship data from Neo4j for contact detection."""
-    borrowings: list[dict] = []
-    try:
-        async with db.neo4j_session() as session:
-            result = await session.run(
-                """
-                MATCH (recipient:LSR {language_code: $lang})-[:BORROWED_FROM]->(donor:LSR)
-                RETURN recipient.form_normalized AS form,
-                       donor.language_code AS donor_language,
-                       recipient.language_code AS recipient_language,
-                       recipient.date_start AS date_start,
-                       recipient.date_end AS date_end,
-                       recipient.definition_primary AS definition
-                """,
-                {"lang": language},
-            )
-            records = await result.fetch(50000)
-            for record in records:
-                date_start = record["date_start"]
-                date_end = record["date_end"]
-                borrowings.append(
-                    {
-                        "form": record["form"],
-                        "source_lang": record["donor_language"],
-                        "target_lang": record["recipient_language"],
-                        "date": (
-                            (date_start + date_end) // 2 if date_start and date_end else date_start
-                        ),
-                        "date_start": date_start,
-                        "date_end": date_end,
-                        "definition": record["definition"],
-                    }
-                )
-    except Exception as e:
-        logger.warning(f"Could not load borrowing data from Neo4j: {e}")
-    return borrowings
-
-
-async def _build_trajectory_data(db: DatabaseManager, form: str, language: str) -> list[dict]:
-    """Load LSR data for a word across time periods for semantic drift analysis."""
-    points: list[dict] = []
-    try:
-        async with db.neo4j_session() as session:
-            result = await session.run(
-                """
-                MATCH (l:LSR {form_normalized: $form, language_code: $lang})
-                RETURN l.form_normalized AS form,
-                       l.date_start AS date_start,
-                       l.date_end AS date_end,
-                       l.definition_primary AS definition,
-                       l.semantic_vector AS semantic_vector,
-                       l.id AS id
-                ORDER BY l.date_start
-                """,
-                {"form": form.lower(), "lang": language},
-            )
-            records = await result.fetch(1000)
-            for record in records:
-                points.append(
-                    {
-                        "form": record["form"],
-                        "date_start": record["date_start"],
-                        "date_end": record["date_end"],
-                        "definition_primary": record["definition"],
-                        "semantic_vector": list(record["semantic_vector"] or []),
-                        "language_code": language,
-                        "id": record["id"],
-                    }
-                )
-    except Exception as e:
-        logger.warning(f"Could not load trajectory data from Neo4j: {e}")
-    return points
+        return normalize_language_code(value)
+    except ValueError as e:
+        raise InvalidLanguageCodeError(language_code=value) from e
 
 
 @router.post(
     "/date-text",
-    responses={400: {"model": ErrorResponse}},
+    responses={400: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
 )
 async def date_text(
     request: DateTextRequest,
     db: DatabaseManager = Depends(get_db),
 ) -> dict:
     """
-    Predict the date range of a text based on vocabulary.
+    Estimate when a text was written from its vocabulary.
 
-    Analyzes the vocabulary in the text and compares it against
-    historical attestation data to estimate when the text was composed.
+    ``predicted_date_range`` is [earliest, latest]: the earliest year is the
+    first attestation of the text's most recent word; the latest is the
+    present unless some words fell out of use. It is null when none of the
+    text's words have attestation dates in the graph (``status`` is then
+    ``insufficient_data``).
     """
     logger.info(f"Dating text in {request.language}, length={len(request.text)}")
 
-    lookup = await _build_lsr_lookup(db, request.language)
-
-    dater = TextDating(lsr_lookup=lookup)
-    result = dater.date_text(request.text, request.language)
+    lookup = await load_vocabulary_for_text(db, request.language, request.text)
+    result = TextDating(lsr_lookup=lookup).date_text(request.text, request.language)
 
     return {
-        "predicted_date_range": list(result.predicted_range),
+        "predicted_date_range": list(result.predicted_range) if result.predicted_range else None,
         "confidence": result.confidence,
+        "status": result.status,
+        "explanation": result.explanation,
         "diagnostic_vocabulary": result.diagnostic_vocabulary,
         "analysis": {
             "language": request.language,
             "text_length": len(request.text),
             "word_count": len(request.text.split()),
             "tokens_analyzed": result.analyzed_tokens,
-            "tokens_matched": result.matched_tokens,
+            "content_words": result.content_tokens,
+            "dated_words": result.matched_tokens,
+            "unknown_words": result.unknown_words,
             "method": result.method,
         },
     }
@@ -170,27 +85,28 @@ async def date_text(
 
 @router.post(
     "/detect-anachronisms",
-    responses={400: {"model": ErrorResponse}},
+    responses={400: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
 )
 async def detect_anachronisms(
     request: AnachronismRequest,
     db: DatabaseManager = Depends(get_db),
 ) -> dict:
     """
-    Detect anachronistic vocabulary in a text.
+    Detect vocabulary that is anachronistic for a claimed date.
 
-    Compares the vocabulary in the text against the claimed date
-    to identify words that were not yet in use at that time.
+    ``verdict`` is ``anachronistic`` / ``suspicious`` when words are first
+    attested after the claimed date, ``consistent`` when enough of the text
+    is dated and nothing postdates it, and ``insufficient_data`` otherwise.
     """
     logger.info(
         f"Checking anachronisms for {request.language}, "
         f"claimed_date={request.claimed_date}, length={len(request.text)}"
     )
 
-    lookup = await _build_lsr_lookup(db, request.language)
-
-    dater = TextDating(lsr_lookup=lookup)
-    result = dater.detect_anachronisms(request.text, request.claimed_date, request.language)
+    lookup = await load_vocabulary_for_text(db, request.language, request.text)
+    result = TextDating(lsr_lookup=lookup).detect_anachronisms(
+        request.text, request.claimed_date, request.language
+    )
 
     return {
         "anachronisms": result.anachronisms,
@@ -201,36 +117,39 @@ async def detect_anachronisms(
             "language": request.language,
             "claimed_date": request.claimed_date,
             "words_analyzed": len(request.text.split()),
+            "content_words": result.content_tokens,
+            "dated_words": result.dated_tokens,
+            "unknown_words": result.unknown_words,
         },
     }
 
 
 @router.get(
     "/contact-events",
-    responses={400: {"model": ErrorResponse}},
+    responses={400: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
 )
 async def get_contact_events(
-    language: str = Query(..., description="ISO 639-3 language code", max_length=10),
-    date_start: int | None = Query(None, description="Start year", ge=-10000, le=3000),
-    date_end: int | None = Query(None, description="End year", ge=-10000, le=3000),
+    language: str = Query(..., description="ISO 639-3 language code", max_length=20),
+    date_start: int | None = Query(None, description="Start year", ge=YEAR_MIN, le=YEAR_MAX),
+    date_end: int | None = Query(None, description="End year", ge=YEAR_MIN, le=YEAR_MAX),
     db: DatabaseManager = Depends(get_db),
 ) -> list[dict]:
     """
     Get detected language contact events.
 
-    Returns contact events where the specified language was either
-    a donor or recipient of vocabulary.
+    Clusters BORROWED_FROM edges by donor/recipient language and century of
+    the borrowing (the borrowed form's first attestation). Returns events
+    where the language was either donor or recipient.
     """
-    language = sanitize_iso_code(language)
-    if not language:
-        raise InvalidLanguageCodeError(language_code=language)
+    language = _language_param(language)
 
     if date_start is not None and date_end is not None and date_end < date_start:
         raise InvalidDateRangeError(start_date=date_start, end_date=date_end)
 
     logger.info(f"Fetching contact events for {language}, dates={date_start}-{date_end}")
 
-    borrowings = await _build_borrowing_data(db, language)
+    borrowings = await load_borrowings(db, language)
+    language_names = {b["source_lang"]: b["source_lang_name"] for b in borrowings}
 
     detector = ContactDetector(borrowing_data=borrowings)
     events = detector.detect_contacts(language, date_start=date_start, date_end=date_end)
@@ -238,6 +157,7 @@ async def get_contact_events(
     return [
         {
             "donor_language": e.donor_language,
+            "donor_language_name": language_names.get(e.donor_language) or e.donor_language,
             "recipient_language": e.recipient_language,
             "date_range": list(e.date_range),
             "vocabulary_count": e.vocabulary_count,
@@ -253,94 +173,56 @@ async def get_contact_events(
 
 @router.get(
     "/semantic-drift",
-    responses={400: {"model": ErrorResponse}},
+    responses={400: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
 )
 async def get_semantic_drift(
     form: str = Query(..., description="Word form to analyze", max_length=200),
-    language: str = Query(..., description="ISO 639-3 language code", max_length=10),
+    language: str = Query(..., description="ISO 639-3 language code", max_length=20),
     db: DatabaseManager = Depends(get_db),
 ) -> dict:
     """
-    Get semantic drift trajectory for a word.
+    Get the semantic drift trajectory for a word.
 
-    Tracks how a word's meaning has changed over time by analyzing
-    its definitions and attestations across different time periods.
+    Needs dated senses of the form with definitions from at least two
+    different years (senses of the same date are not a change over time);
+    otherwise ``status`` is ``insufficient_data`` and ``explanation`` says
+    why. Distances compare definition text with a lightweight hashed n-gram
+    encoder (see src/pipelines/embedding.py), so they measure change in how
+    the sense is described, not a trained model of meaning.
     """
     form = sanitize_string(form, max_length=200)
-    language = sanitize_iso_code(language)
-
     if not form:
         raise ValidationError(message="Form is required", field="form")
-    if not language:
-        raise InvalidLanguageCodeError(language_code=language)
+    language = _language_param(language)
 
     logger.info(f"Fetching semantic drift for '{form}' in {language}")
 
-    trajectory_data = await _build_trajectory_data(db, form, language)
-
-    lsr_data_dict = {f"{form.lower()}:{language}": trajectory_data} if trajectory_data else {}
-    analyzer = SemanticDriftAnalyzer(lsr_data=lsr_data_dict)
-    result = analyzer.get_trajectory(form, language)
-
-    if result is None:
-        return {
-            "form": form,
-            "language": language,
-            "trajectory": [],
-            "shift_events": [],
-            "total_drift": 0.0,
-            "stability_score": 1.0,
-        }
-
-    return {
-        "form": form,
-        "language": language,
-        "trajectory": [
-            {
-                "date": p.date,
-                "embedding_2d": list(p.embedding_2d),
-                "definition": p.definition,
-                "attestation_count": p.attestation_count,
-                "confidence": p.confidence,
-            }
-            for p in result.points
-        ],
-        "shift_events": [
-            {
-                "date": e.date,
-                "change_type": e.change_type,
-                "confidence": e.confidence,
-                "magnitude": e.magnitude,
-                "before_meaning": e.before_meaning,
-                "after_meaning": e.after_meaning,
-                "evidence": e.evidence,
-            }
-            for e in result.shift_events
-        ],
-        "total_drift": result.total_drift,
-        "stability_score": result.stability_score,
-    }
+    return drift_report(form, language, await load_trajectory(db, form, language))
 
 
 @router.get(
     "/compare-concept",
-    responses={400: {"model": ErrorResponse}},
+    responses={400: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
 )
 async def compare_concept(
-    concept: str = Query(..., description="Concept to compare (e.g., 'freedom')", max_length=100),
-    languages: str = Query(..., description="Comma-separated ISO 639-3 codes", max_length=100),
+    concept: str = Query(
+        ..., description="Written form to look up in each language (no translation)", max_length=100
+    ),
+    languages: str = Query(
+        ..., description="Comma-separated ISO 639-3 codes (at most 10)", max_length=250
+    ),
     db: DatabaseManager = Depends(get_db),
 ) -> dict:
     """
-    Compare how a concept is expressed across languages.
+    Compare the trajectories of one written form across languages.
 
-    Analyzes the semantic trajectories of translations/equivalents
-    of a concept across multiple languages.
+    The same spelling is looked up in each language; there is no
+    translation step, so this is useful for shared loanwords and
+    identically spelled cognates (e.g. "taxi", "chocolate").
     """
     concept = sanitize_string(concept, max_length=100)
 
-    language_list = [sanitize_iso_code(lang.strip()) for lang in languages.split(",")]
-    language_list = [lang for lang in language_list if lang]
+    language_list = [_language_param(lang) for lang in languages.split(",") if lang.strip()]
 
     if not concept:
         raise ValidationError(message="Concept is required", field="concept")
@@ -355,18 +237,22 @@ async def compare_concept(
 
     results_by_lang = []
     for lang in language_list:
-        trajectory_data = await _build_trajectory_data(db, concept, lang)
+        trajectory_data = await load_trajectory(db, concept, lang)
         lsr_data_dict = {f"{concept.lower()}:{lang}": trajectory_data} if trajectory_data else {}
         analyzer = SemanticDriftAnalyzer(lsr_data=lsr_data_dict)
         trajectory = analyzer.get_trajectory(concept, lang)
 
+        # Senses of a single date have nothing to drift from
+        status, explanation = assess_trajectory(trajectory, concept, lang)
         lang_result: dict = {
             "language": lang,
             "forms": [d["form"] for d in trajectory_data] if trajectory_data else [],
+            "status": status,
+            "explanation": explanation,
             "trajectory": None,
         }
 
-        if trajectory:
+        if trajectory and status == "ok":
             lang_result["trajectory"] = {
                 "points": [{"date": p.date, "definition": p.definition} for p in trajectory.points],
                 "total_drift": trajectory.total_drift,

@@ -1,24 +1,49 @@
-"""Text dating analysis using vocabulary attestation patterns."""
+"""Text dating and anachronism detection from vocabulary attestation dates.
+
+The evidence is each word's attestation window in the graph: ``date_start``
+is its first attestation, ``date_end`` its last (None = still in use).
+
+- A text can be no older than its most recently coined word (terminus
+  post quem); obsolete words give a soft upper bound.
+- A word first attested after a text's claimed date is an anachronism.
+
+Every result reports coverage (how many content words had dates). When
+there is too little dated vocabulary the verdict is ``insufficient_data``;
+absence of evidence is never reported as a confident "consistent".
+"""
 
 import logging
-import re
 from dataclasses import dataclass, field
-from statistics import median
+from datetime import date
 from typing import Any
 
+from src.analysis.data_access import lookup_candidates, tokenize
+
 logger = logging.getLogger(__name__)
+
+# Below this share of dated content words, "no anachronisms found" is not
+# evidence that a text is consistent with its claimed date.
+MIN_COVERAGE_FOR_CONSISTENT = 0.5
+
+# Dated words needed before coverage alone drives confidence
+FULL_EVIDENCE_WORDS = 5
 
 
 @dataclass
 class DateAnalysis:
     """Result of text dating analysis."""
 
-    predicted_range: tuple[int, int]
+    # (earliest, latest) plausible year, or None when there is no evidence
+    predicted_range: tuple[int, int] | None
     confidence: float
     diagnostic_vocabulary: list[dict] = field(default_factory=list)
     analyzed_tokens: int = 0
     matched_tokens: int = 0
     method: str = "vocabulary_attestation"
+    status: str = "ok"  # "ok", "conflicting_evidence", "insufficient_data"
+    content_tokens: int = 0
+    unknown_words: list[str] = field(default_factory=list)
+    explanation: str = ""
 
 
 @dataclass
@@ -26,9 +51,25 @@ class AnachronismAnalysis:
     """Result of anachronism detection."""
 
     anachronisms: list[dict] = field(default_factory=list)
-    verdict: str = "consistent"  # "consistent", "suspicious", "anachronistic"
-    confidence: float = 1.0
+    # "consistent", "suspicious", "anachronistic", "insufficient_data"
+    verdict: str = "insufficient_data"
+    confidence: float = 0.0
     explanation: str = ""
+    content_tokens: int = 0
+    dated_tokens: int = 0
+    unknown_words: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _WordEvidence:
+    """Dating evidence for one content token."""
+
+    word: str
+    form: str
+    date_start: int | None
+    date_end: int | None
+    # date_start as the source states it ("c. 1220", "earliest in corpus: …")
+    date_label: str = ""
 
 
 # Common words to skip during analysis (high-frequency words with little dating value)
@@ -133,10 +174,10 @@ class TextDating:
     """
     Analyze and date text based on vocabulary attestation patterns.
 
-    This class provides methods to:
-    1. Predict the approximate date range of a text based on vocabulary
-    2. Detect anachronistic vocabulary that doesn't match claimed dates
-    3. Identify diagnostic vocabulary that strongly indicates time periods
+    Provides:
+    1. A plausible date range for a text (terminus post quem from its
+       newest word, soft upper bound from obsolete words)
+    2. Detection of anachronistic vocabulary relative to a claimed date
     """
 
     def __init__(self, lsr_lookup: dict[str, dict[str, Any]] | None = None):
@@ -146,9 +187,9 @@ class TextDating:
         Args:
             lsr_lookup: Dictionary mapping normalized forms to LSR data
                        with keys: 'date_start', 'date_end', 'language_code'
+                       (see src.analysis.data_access.load_vocabulary).
         """
         self._lsr_lookup = lsr_lookup or {}
-        self._classifier = None
 
     def set_lsr_lookup(self, lookup: dict[str, dict[str, Any]]) -> None:
         """
@@ -159,116 +200,111 @@ class TextDating:
         """
         self._lsr_lookup = lookup
 
-    def load_classifier(self, model_path: str | None = None) -> None:
-        """
-        Load a trained ML classifier for text dating.
-
-        Args:
-            model_path: Path to the trained model file.
-        """
-        # For now, we use the vocabulary-based approach
-        # A trained classifier would improve accuracy
-        self._classifier = None
-        logger.info("Using vocabulary attestation method for dating")
-
     def date_text(self, text: str, language: str = "eng") -> DateAnalysis:
         """
-        Predict the date range of a text based on vocabulary.
+        Estimate when a text could have been written from its vocabulary.
 
-        The algorithm:
-        1. Tokenizes the text and normalizes words
-        2. Looks up attestation dates for each word
-        3. Calculates a date range based on the overlap of word attestations
-        4. Identifies diagnostic vocabulary (words with narrow date ranges)
+        The earliest plausible year is the latest first attestation among
+        the text's words. The latest plausible year is the earliest last
+        attestation among words that fell out of use, or the present.
 
         Args:
             text: The text to analyze.
             language: ISO 639-3 language code (default: 'eng' for English).
 
         Returns:
-            DateAnalysis with predicted range and confidence.
+            DateAnalysis with predicted range, confidence and coverage.
         """
-        # Tokenize and normalize
-        tokens = self._tokenize(text)
-        normalized_tokens = [self._normalize(t) for t in tokens]
+        tokens = tokenize(text)
+        content = self._content_tokens(tokens)
+        evidence, unknown = self._gather_evidence(content, language)
+        dated = [e for e in evidence if e.date_start is not None]
 
-        # Filter out stop words and short tokens
-        content_tokens = [t for t in normalized_tokens if t not in STOP_WORDS and len(t) > 2]
-
-        if not content_tokens:
+        if not dated:
             return DateAnalysis(
-                predicted_range=(0, 0),
+                predicted_range=None,
                 confidence=0.0,
-                diagnostic_vocabulary=[],
+                status="insufficient_data",
+                explanation=self._no_evidence_message(len(content), len(evidence), language),
                 analyzed_tokens=len(tokens),
                 matched_tokens=0,
+                content_tokens=len(content),
+                unknown_words=unknown[:50],
             )
 
-        # Look up dates for each token
-        date_ranges: list[tuple[int, int]] = []
-        diagnostic_words: list[dict] = []
-        matched_count = 0
+        lower = max(e.date_start for e in dated if e.date_start is not None)
+        ended = [e.date_end for e in dated if e.date_end is not None]
+        current_year = date.today().year
+        upper = min(ended) if ended else current_year
 
-        for token in content_tokens:
-            lsr_data = self._lsr_lookup.get(token)
-            if lsr_data and lsr_data.get("language_code") == language:
-                date_start = lsr_data.get("date_start")
-                date_end = lsr_data.get("date_end")
+        coverage = len(dated) / len(content)
+        confidence = coverage * min(1.0, len(dated) / FULL_EVIDENCE_WORDS)
+        newest = sorted({e.word for e in dated if e.date_start == lower})
 
-                if date_start is not None and date_end is not None:
-                    matched_count += 1
-                    date_ranges.append((date_start, date_end))
-
-                    # Check if this is a diagnostic word (narrow date range)
-                    span = date_end - date_start
-                    if span < 200:  # Less than 200 years span
-                        diagnostic_words.append(
-                            {
-                                "word": token,
-                                "date_start": date_start,
-                                "date_end": date_end,
-                                "span": span,
-                                "diagnostic_value": max(0.0, 1.0 - span / 200),
-                            }
-                        )
-
-        if not date_ranges:
-            return DateAnalysis(
-                predicted_range=(0, 0),
-                confidence=0.0,
-                diagnostic_vocabulary=[],
-                analyzed_tokens=len(tokens),
-                matched_tokens=0,
+        if lower <= upper:
+            status = "ok"
+            predicted = (lower, upper)
+            explanation = (
+                f"Written no earlier than {lower} (first attestation of "
+                f"{', '.join(newest)}); {len(dated)} of {len(content)} content words dated."
+            )
+        else:
+            # A word fell out of use before another was coined. Coinage is
+            # hard evidence; obsolete words may be deliberate archaisms.
+            status = "conflicting_evidence"
+            predicted = (lower, current_year)
+            confidence *= 0.5
+            obsolete = sorted(
+                {e.word for e in dated if e.date_end is not None and e.date_end < lower}
+            )
+            explanation = (
+                f"Written no earlier than {lower} ({', '.join(newest)}), but "
+                f"{', '.join(obsolete)} fell out of use earlier; possible archaism."
             )
 
-        # Calculate the predicted date range
-        predicted_range = self._calculate_date_range(date_ranges)
-
-        # Calculate confidence based on coverage and agreement
-        coverage = matched_count / len(content_tokens)
-        agreement = self._calculate_agreement(date_ranges, predicted_range)
-        confidence = min(1.0, coverage * 0.5 + agreement * 0.5)
-
-        # Sort diagnostic words by diagnostic value
-        diagnostic_words.sort(key=lambda x: x["diagnostic_value"], reverse=True)
+        # A word sets the upper bound only when the reported range ends at its
+        # last attestation; with conflicting evidence the range runs to the present.
+        diagnostic = [
+            {
+                "word": e.word,
+                "form": e.form,
+                "date_start": e.date_start,
+                "date_label": e.date_label,
+                "date_end": e.date_end,
+                "sets_bound": (
+                    "lower"
+                    if e.date_start == lower
+                    else (
+                        "upper"
+                        if status == "ok" and e.date_end is not None and e.date_end == upper
+                        else None
+                    )
+                ),
+            }
+            for e in sorted(dated, key=lambda e: -(e.date_start or 0))
+        ]
 
         return DateAnalysis(
-            predicted_range=predicted_range,
+            predicted_range=predicted,
             confidence=round(confidence, 3),
-            diagnostic_vocabulary=diagnostic_words[:20],  # Top 20
+            diagnostic_vocabulary=diagnostic[:20],
+            status=status,
+            explanation=explanation,
             analyzed_tokens=len(tokens),
-            matched_tokens=matched_count,
+            matched_tokens=len(dated),
+            content_tokens=len(content),
+            unknown_words=unknown[:50],
         )
 
     def detect_anachronisms(
         self, text: str, claimed_date: int, language: str = "eng"
     ) -> AnachronismAnalysis:
         """
-        Detect anachronistic vocabulary in a text.
+        Detect vocabulary that is anachronistic for a claimed date.
 
-        Checks if the vocabulary used in the text is consistent with
-        the claimed date. Words that were coined after the claimed date
-        are flagged as potential anachronisms.
+        Words first attested after the claimed date are anachronisms
+        ("coined_after"). Words last attested before it are reported as
+        possible archaisms ("obsolete_before") but do not drive the verdict.
 
         Args:
             text: The text to analyze.
@@ -276,161 +312,140 @@ class TextDating:
             language: ISO 639-3 language code.
 
         Returns:
-            AnachronismAnalysis with detected anachronisms and verdict.
+            AnachronismAnalysis with detected anachronisms, verdict and coverage.
         """
-        # Tokenize and normalize
-        tokens = self._tokenize(text)
-        normalized_tokens = [self._normalize(t) for t in tokens]
-
-        # Filter out stop words
-        content_tokens = [t for t in normalized_tokens if t not in STOP_WORDS and len(t) > 2]
+        tokens = tokenize(text)
+        content = self._content_tokens(tokens)
+        evidence, unknown = self._gather_evidence(content, language)
+        dated = [e for e in evidence if e.date_start is not None]
 
         anachronisms: list[dict] = []
-        suspicious_count = 0
-        total_checked = 0
+        for e in dated:
+            if e.date_start is not None and e.date_start > claimed_date:
+                gap = e.date_start - claimed_date
+                anachronisms.append(
+                    {
+                        "word": e.word,
+                        "form": e.form,
+                        "type": "coined_after",
+                        "earliest_attestation": e.date_start,
+                        "date_label": e.date_label,
+                        "claimed_date": claimed_date,
+                        "gap_years": gap,
+                        "severity": "high" if gap > 100 else "medium" if gap > 50 else "low",
+                    }
+                )
+            elif e.date_end is not None and e.date_end < claimed_date:
+                anachronisms.append(
+                    {
+                        "word": e.word,
+                        "form": e.form,
+                        "type": "obsolete_before",
+                        "last_attestation": e.date_end,
+                        "claimed_date": claimed_date,
+                        "gap_years": claimed_date - e.date_end,
+                        "severity": "low",
+                    }
+                )
+        anachronisms.sort(key=lambda a: a["gap_years"], reverse=True)
 
-        for token in content_tokens:
-            lsr_data = self._lsr_lookup.get(token)
-            if lsr_data and lsr_data.get("language_code") == language:
-                total_checked += 1
-                date_start = lsr_data.get("date_start")
+        coined = [a for a in anachronisms if a["type"] == "coined_after"]
+        significant = [a for a in coined if a["severity"] in ("high", "medium")]
+        coverage = len(dated) / len(content) if content else 0.0
+        max_gap = max((a["gap_years"] for a in coined), default=0)
 
-                if date_start is not None and date_start > claimed_date:
-                    # This word didn't exist at the claimed date
-                    gap = date_start - claimed_date
-                    severity = "high" if gap > 100 else "medium" if gap > 50 else "low"
-
-                    anachronisms.append(
-                        {
-                            "word": token,
-                            "earliest_attestation": date_start,
-                            "claimed_date": claimed_date,
-                            "gap_years": gap,
-                            "severity": severity,
-                        }
-                    )
-
-                    if severity in ("high", "medium"):
-                        suspicious_count += 1
-
-        # Determine verdict
-        if not anachronisms:
-            verdict = "consistent"
-            confidence = 1.0
-            explanation = "No anachronistic vocabulary detected."
-        elif suspicious_count == 0:
-            verdict = "consistent"
-            confidence = 0.9
-            explanation = f"Minor anachronisms detected ({len(anachronisms)} words), but within acceptable range."
-        elif suspicious_count <= 2:
-            verdict = "suspicious"
-            confidence = 0.6
-            explanation = f"Some suspicious vocabulary detected ({suspicious_count} significant anachronisms)."
+        if significant:
+            verdict = "anachronistic" if len(significant) >= 3 or max_gap > 200 else "suspicious"
+            confidence = min(0.95, 0.5 + 0.15 * len(significant) + (0.1 if max_gap > 200 else 0))
+            words = ", ".join(f"{a['word']} ({a['earliest_attestation']})" for a in significant[:5])
+            explanation = (
+                f"{len(significant)} word(s) first attested well after {claimed_date}: {words}."
+            )
+        elif not dated or coverage < MIN_COVERAGE_FOR_CONSISTENT:
+            verdict = "insufficient_data"
+            confidence = 0.0
+            explanation = (
+                self._no_evidence_message(len(content), len(evidence), language)
+                if not dated
+                else f"Only {len(dated)} of {len(content)} content words have attestation dates; "
+                "too few to judge the text consistent with its claimed date."
+            )
         else:
-            verdict = "anachronistic"
-            confidence = 0.3
-            explanation = f"Multiple anachronisms detected ({suspicious_count} significant). Text likely not from claimed date."
-
-        # Sort by gap (most anachronistic first)
-        anachronisms.sort(key=lambda x: x["gap_years"], reverse=True)
+            verdict = "consistent"
+            confidence = coverage * min(1.0, len(dated) / FULL_EVIDENCE_WORDS)
+            if coined:
+                late = ", ".join(f"{a['word']} ({a['earliest_attestation']})" for a in coined[:5])
+                verb = "postdates" if len(coined) == 1 else "postdate"
+                explanation = (
+                    f"No word among the {len(dated)} dated content words (of {len(content)}) "
+                    f"is first attested more than 50 years after {claimed_date}; "
+                    f"{len(coined)} {verb} it by 50 years or less: {late}."
+                )
+            else:
+                explanation = (
+                    f"No word among the {len(dated)} dated content words "
+                    f"(of {len(content)}) is first attested after {claimed_date}."
+                )
 
         return AnachronismAnalysis(
-            anachronisms=anachronisms[:20],  # Top 20
+            anachronisms=anachronisms[:20],
             verdict=verdict,
             confidence=round(confidence, 3),
             explanation=explanation,
+            content_tokens=len(content),
+            dated_tokens=len(dated),
+            unknown_words=unknown[:50],
         )
 
-    def _tokenize(self, text: str) -> list[str]:
-        """
-        Tokenize text into words.
+    @staticmethod
+    def _content_tokens(tokens: list[str]) -> list[str]:
+        """Distinct content words, in order: no stop words or very short tokens.
 
-        Args:
-            text: The text to tokenize.
+        Coverage is counted over distinct words, so a repeated word counts once.
+        """
+        return list(dict.fromkeys(t for t in tokens if t not in STOP_WORDS and len(t) > 2))
+
+    def _gather_evidence(
+        self, content: list[str], language: str
+    ) -> tuple[list[_WordEvidence], list[str]]:
+        """Look up each distinct content token (with inflection fallbacks).
 
         Returns:
-            List of word tokens.
+            (evidence for tokens found in the graph, tokens not found)
         """
-        # Simple tokenization: split on non-word characters
-        tokens = re.findall(r"\b[a-zA-Z]+\b", text)
-        return tokens
+        evidence: list[_WordEvidence] = []
+        unknown: list[str] = []
+        for token in dict.fromkeys(content):
+            for candidate in lookup_candidates(token, language):
+                data = self._lsr_lookup.get(candidate)
+                if data and data.get("language_code") == language:
+                    evidence.append(
+                        _WordEvidence(
+                            word=token,
+                            form=candidate,
+                            date_start=data.get("date_start"),
+                            date_end=data.get("date_end"),
+                            date_label=data.get("date_label") or "",
+                        )
+                    )
+                    break
+            else:
+                unknown.append(token)
+        return evidence, unknown
 
-    def _normalize(self, token: str) -> str:
-        """
-        Normalize a token for lookup.
-
-        Args:
-            token: The token to normalize.
-
-        Returns:
-            Normalized token (lowercase).
-        """
-        return token.lower()
-
-    def _calculate_date_range(self, date_ranges: list[tuple[int, int]]) -> tuple[int, int]:
-        """
-        Calculate the most likely date range from multiple word attestations.
-
-        Uses a weighted approach favoring the intersection of date ranges.
-
-        Args:
-            date_ranges: List of (start, end) tuples for each word.
-
-        Returns:
-            Predicted (start, end) date range.
-        """
-        if not date_ranges:
-            return (0, 0)
-
-        # Get all start and end dates
-        starts = [r[0] for r in date_ranges]
-        ends = [r[1] for r in date_ranges]
-
-        # The text must be from when all words existed
-        # So: after the latest word was coined, before any word fell out of use
-        predicted_start = max(starts)  # All words must exist
-        predicted_end = min(ends)  # None have fallen out of use yet
-
-        # If ranges don't overlap, use the median approach
-        if predicted_start > predicted_end:
-            predicted_start = int(median(starts))
-            predicted_end = int(median(ends))
-
-            # Ensure valid range
-            if predicted_start > predicted_end:
-                mid = (predicted_start + predicted_end) // 2
-                predicted_start = mid - 50
-                predicted_end = mid + 50
-
-        return (predicted_start, predicted_end)
-
-    def _calculate_agreement(
-        self, date_ranges: list[tuple[int, int]], predicted: tuple[int, int]
-    ) -> float:
-        """
-        Calculate how well the word date ranges agree with the prediction.
-
-        Args:
-            date_ranges: List of word date ranges.
-            predicted: The predicted date range.
-
-        Returns:
-            Agreement score between 0 and 1.
-        """
-        if not date_ranges:
-            return 0.0
-
-        pred_start, pred_end = predicted
-        pred_mid = (pred_start + pred_end) // 2
-
-        # Calculate how many words support the prediction
-        supporting = 0
-        for start, end in date_ranges:
-            # Word supports prediction if prediction falls within word's range
-            if start <= pred_mid <= end:
-                supporting += 1
-
-        return supporting / len(date_ranges)
+    @staticmethod
+    def _no_evidence_message(content: int, known: int, language: str) -> str:
+        if content == 0:
+            return "The text has no content words to analyze."
+        if known == 0:
+            return (
+                f"None of the {content} content words are in the lexical graph for "
+                f"'{language}'. Ingest data for this language first."
+            )
+        return (
+            f"{known} of {content} content words are in the graph for '{language}', "
+            "but none has an attestation date."
+        )
 
 
 # Convenience function for API use

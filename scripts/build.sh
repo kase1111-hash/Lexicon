@@ -70,7 +70,7 @@ cmd_test_unit() {
 
 cmd_test_cov() {
     echo -e "${YELLOW}Running tests with coverage...${NC}"
-    pytest tests/ --cov=src --cov-report=html --cov-report=term-missing
+    pytest tests/ --ignore=tests/performance --cov=src --cov-report=html --cov-report=term-missing
 }
 
 cmd_lint() {
@@ -90,7 +90,7 @@ cmd_format() {
 
 cmd_type_check() {
     echo -e "${YELLOW}Running type checker...${NC}"
-    mypy src --ignore-missing-imports
+    mypy src
 }
 
 cmd_security_check() {
@@ -125,21 +125,26 @@ cmd_clean() {
 cmd_check() {
     echo -e "${YELLOW}Running all checks...${NC}"
     echo ""
+    local failed=0
     echo "=== Linting ==="
-    ruff check src tests || true
+    ruff check src tests || failed=1
     echo ""
     echo "=== Type Checking ==="
-    mypy src --ignore-missing-imports || true
+    mypy src || failed=1
     echo ""
     echo "=== Security Scanning ==="
-    bandit -r src -c pyproject.toml || true
+    bandit -r src -c pyproject.toml || failed=1
     echo ""
-    echo -e "${GREEN}All checks complete!${NC}"
+    if [ "$failed" -ne 0 ]; then
+        echo -e "${RED}Some checks failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}All checks passed!${NC}"
 }
 
 cmd_run_api() {
     echo -e "${YELLOW}Starting API server...${NC}"
-    uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+    uvicorn src.api.main:app --reload --host 127.0.0.1 --port 8000
 }
 
 cmd_docker_up() {

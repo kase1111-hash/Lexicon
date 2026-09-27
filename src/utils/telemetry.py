@@ -198,7 +198,9 @@ class Tracer:
         return _current_span.get()
 
     def get_recent_spans(self, limit: int = 100) -> list[dict[str, Any]]:
-        """Get recent spans for debugging."""
+        """Get the last `limit` completed spans (oldest first) for debugging."""
+        if limit <= 0:
+            return []
         return [span.to_dict() for span in self._spans[-limit:]]
 
     def get_trace(self, trace_id: str) -> list[dict[str, Any]]:

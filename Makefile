@@ -1,26 +1,36 @@
-# Linguistic Stratigraphy - Makefile
+# Lexicon - Makefile
 # Common development and deployment commands
 
-.PHONY: help install install-dev test lint format type-check security-check \
+.PHONY: help install install-dev test test-unit test-integration test-db test-db-start \
+        test-db-stop test-cov lint format type-check security-check audit \
         docker-up docker-down docker-build docker-logs clean pre-commit \
+        db-init db-migrate run-api ingest-wiktionary ingest-clld ingest-clics ingest-corpus \
         build dist publish version-check release-check package-all docker-image \
         version-bump-patch version-bump-minor version-bump-major
 
+# Tools run as `python -m <tool>` so they use the interpreter that has the
+# project's dependencies, not whatever same-named command is first on PATH
+PYTHON ?= python
+
 # Default target
 help:
-	@echo "Linguistic Stratigraphy - Available Commands"
-	@echo "============================================="
+	@echo "Lexicon - Available Commands"
+	@echo "============================"
 	@echo ""
 	@echo "Development:"
-	@echo "  make install       Install production dependencies"
-	@echo "  make install-dev   Install development dependencies"
-	@echo "  make test          Run all tests"
+	@echo "  make install       Install dependencies and the lexicon/ls-api/ls-ingest commands"
+	@echo "  make install-dev   Install development dependencies and the pre-commit hook"
+	@echo "  make test          Run all tests (no database needed; DB tests are skipped)"
 	@echo "  make test-unit     Run unit tests only"
+	@echo "  make test-integration Run integration tests (DB tests skipped without TEST_NEO4J_URI)"
+	@echo "  make test-db       Run all tests against a throwaway Neo4j (TEST_NEO4J_URI)"
+	@echo "  make test-db-start Start that throwaway Neo4j (bolt://localhost:7688)"
 	@echo "  make test-cov      Run tests with coverage report"
 	@echo "  make lint          Run linter (ruff)"
 	@echo "  make format        Format code (black)"
 	@echo "  make type-check    Run type checker (mypy)"
 	@echo "  make security-check Run security scanner (bandit)"
+	@echo "  make audit         Check pinned dependencies for known vulnerabilities"
 	@echo "  make pre-commit    Run all pre-commit hooks"
 	@echo "  make clean         Remove build artifacts"
 	@echo ""
@@ -32,8 +42,13 @@ help:
 	@echo "  make docker-ps     Show running containers"
 	@echo ""
 	@echo "Database:"
-	@echo "  make db-init       Initialize databases"
-	@echo "  make db-migrate    Run database migrations"
+	@echo "  make db-init       Start the databases and create the Neo4j schema"
+	@echo "                     (WITH_POSTGRES=1 also the optional PostgreSQL)"
+	@echo "  make db-migrate    Apply PostgreSQL migrations (optional profile)"
+	@echo ""
+	@echo "Data:"
+	@echo "  make ingest-clld   Ingest WOLD loanwords (downloads the CLDF data)"
+	@echo "  make ingest-corpus Ingest the 4-excerpt sample corpus (format demo; skews dating)"
 	@echo ""
 	@echo "Build & Release:"
 	@echo "  make build         Build wheel package"
@@ -56,41 +71,74 @@ help:
 # =============================================================================
 
 install:
-	pip install -r requirements.txt
+	$(PYTHON) -m pip install -r requirements.txt
+	$(PYTHON) -m pip install --no-deps -e .
 
 install-dev:
-	pip install -r requirements-dev.txt
+	$(PYTHON) -m pip install -r requirements-dev.txt
+	$(PYTHON) -m pip install --no-deps -e .
 	pre-commit install
 
+# Tests never touch your databases: tests/conftest.py ignores .env and points
+# every store at an unreachable address unless a TEST_* variable names one.
 test:
-	pytest tests/ -v
+	$(PYTHON) -m pytest tests/
 
 test-unit:
-	pytest tests/unit/ -v
+	$(PYTHON) -m pytest tests/unit/
 
 test-integration:
-	pytest tests/integration/ -v -m integration
+	$(PYTHON) -m pytest tests/integration/
 
+# DB-backed tests create and delete nodes, so give them a throwaway Neo4j:
+#   make test-db-start && make test-db && make test-db-stop
+# or point TEST_NEO4J_URI / TEST_NEO4J_PASSWORD at another disposable instance.
+TEST_NEO4J_PORT ?= 7688
+TEST_NEO4J_URI ?= bolt://localhost:$(TEST_NEO4J_PORT)
+TEST_NEO4J_PASSWORD ?= testpassword123
+TEST_NEO4J_CONTAINER ?= lexicon-test-neo4j
+
+test-db:
+	TEST_NEO4J_URI=$(TEST_NEO4J_URI) TEST_NEO4J_PASSWORD=$(TEST_NEO4J_PASSWORD) $(PYTHON) -m pytest tests/
+
+test-db-start:
+	docker run -d --rm --name $(TEST_NEO4J_CONTAINER) -p 127.0.0.1:$(TEST_NEO4J_PORT):7687 \
+		-e NEO4J_AUTH=neo4j/$(TEST_NEO4J_PASSWORD) \
+		-e NEO4J_server_memory_heap_max__size=512m neo4j:5.9
+	@echo "Waiting for Neo4j on bolt://localhost:$(TEST_NEO4J_PORT) ..."
+	@for i in $$(seq 1 90); do \
+		docker exec $(TEST_NEO4J_CONTAINER) cypher-shell -u neo4j -p '$(TEST_NEO4J_PASSWORD)' \
+			'RETURN 1' >/dev/null 2>&1 && echo "Neo4j is up" && exit 0; \
+		sleep 1; \
+	done; echo "Neo4j did not start" >&2; exit 1
+
+test-db-stop:
+	docker rm -f $(TEST_NEO4J_CONTAINER)
+
+# Performance tests assert timings, which coverage tracing distorts
 test-cov:
-	pytest tests/ --cov=src --cov-report=html --cov-report=term-missing
+	$(PYTHON) -m pytest tests/ --ignore=tests/performance --cov=src --cov-report=html --cov-report=term-missing
 
 lint:
-	ruff check src tests
+	$(PYTHON) -m ruff check src tests
 
 lint-fix:
-	ruff check src tests --fix
+	$(PYTHON) -m ruff check src tests --fix
 
 format:
-	black src tests
+	$(PYTHON) -m black src tests
 
 format-check:
-	black src tests --check
+	$(PYTHON) -m black src tests --check
 
 type-check:
-	mypy src
+	$(PYTHON) -m mypy src
 
 security-check:
-	bandit -r src -c pyproject.toml
+	$(PYTHON) -m bandit -r src -c pyproject.toml
+
+audit:
+	$(PYTHON) -m pip_audit -r requirements.txt
 
 pre-commit:
 	pre-commit run --all-files
@@ -135,72 +183,88 @@ docker-clean:
 # Database Commands
 # =============================================================================
 
+# Starts neo4j/elasticsearch/redis (plus postgres with WITH_POSTGRES=1) and
+# creates the schemas with the credentials in .env
 db-init:
-	./scripts/setup_databases.sh
+	PYTHON=$(PYTHON) bash scripts/setup_databases.sh
 
+# PostgreSQL is optional (reserved for future use); start it first with
+#   docker compose --profile postgres up -d postgres
 db-migrate:
-	alembic upgrade head
+	$(PYTHON) -m alembic upgrade head
 
 db-migrate-down:
-	alembic downgrade -1
+	$(PYTHON) -m alembic downgrade -1
 
 db-revision:
-	alembic revision --autogenerate -m "$(MSG)"
+	$(PYTHON) -m alembic revision --autogenerate -m "$(MSG)"
 
 db-migrate-history:
-	alembic history --verbose
+	$(PYTHON) -m alembic history --verbose
 
 # =============================================================================
 # API Commands
 # =============================================================================
 
 run-api:
-	uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+	$(PYTHON) -m uvicorn src.api.main:app --reload --host 127.0.0.1 --port 8000
+
+# Workers share async export jobs and rate-limit counters only through Redis,
+# which the API uses only when REDIS_URI or REDIS_PASSWORD is set; unless that
+# Redis answers, this runs a single worker.
+API_WORKERS ?= 4
 
 run-api-prod:
-	uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 4
+	@workers=$(API_WORKERS); \
+	if [ "$$workers" -gt 1 ] && ! $(PYTHON) -c "import sys, redis; from src.utils.db import DatabaseConfig; c = DatabaseConfig(); sys.exit(0 if c.redis_configured and redis.Redis.from_url(c.redis_uri, socket_connect_timeout=2).ping() else 1)" >/dev/null 2>&1; then \
+		echo "Redis is not configured or not reachable: starting 1 worker instead of $$workers"; \
+		workers=1; \
+	fi; \
+	exec $(PYTHON) -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers $$workers
 
 # =============================================================================
 # Ingestion Commands
 # =============================================================================
 
 ingest-wiktionary:
-	python -m src.ingestion --source wiktionary --words data/seed_words_eng.txt
+	$(PYTHON) -m src.ingestion --source wiktionary --words data/seed_words_eng.txt
 
 ingest-clld:
-	python -m src.ingestion --source wold
+	$(PYTHON) -m src.ingestion --source wold
 
 ingest-clics:
-	python -m src.ingestion --source clics
+	$(PYTHON) -m src.ingestion --source clics
 
+# data/corpus ships a few short dated public-domain excerpts (see its README).
+# They show the format; their dates only say which of four texts a word is in.
 ingest-corpus:
-	python -m src.ingestion --source corpus
+	$(PYTHON) -m src.ingestion --source corpus --corpus-dir data/corpus --language English
 
 # =============================================================================
 # Build & Release Commands
 # =============================================================================
 
 build:
-	pip install build
-	python -m build --wheel
+	$(PYTHON) -m pip install build
+	$(PYTHON) -m build --wheel
 
 dist:
-	pip install build
-	python -m build
+	$(PYTHON) -m pip install build
+	$(PYTHON) -m build
 
 version-check:
 	@echo "VERSION file: $$(cat VERSION)"
 	@echo "pyproject.toml: $$(grep '^version' pyproject.toml | head -1)"
-	@echo "src/__init__.py: $$(python -c "from src import __version__; print(__version__)")"
+	@echo "src/__init__.py: $$($(PYTHON) -c "from src import __version__; print(__version__)")"
 
 version-bump-patch:
-	python scripts/bump_version.py patch
+	$(PYTHON) scripts/bump_version.py patch
 
 version-bump-minor:
-	python scripts/bump_version.py minor
+	$(PYTHON) scripts/bump_version.py minor
 
 version-bump-major:
-	python scripts/bump_version.py major
+	$(PYTHON) scripts/bump_version.py major
 
 release-check: lint type-check security-check test
 	@echo ""
@@ -209,12 +273,12 @@ release-check: lint type-check security-check test
 	$(MAKE) version-check
 
 publish: dist
-	pip install twine
-	twine upload dist/*
+	$(PYTHON) -m pip install twine
+	$(PYTHON) -m twine upload dist/*
 
 publish-test: dist
-	pip install twine
-	twine upload --repository testpypi dist/*
+	$(PYTHON) -m pip install twine
+	$(PYTHON) -m twine upload --repository testpypi dist/*
 
 # =============================================================================
 # Convenience Aliases
@@ -235,14 +299,17 @@ all: clean install-dev check test build
 # Package Distribution
 # =============================================================================
 
+# Same name as the release workflow publishes and the production overlay runs
+IMAGE ?= ghcr.io/kase1111-hash/lexicon
+
 docker-image:
-	docker build -t linguistic-stratigraphy:$$(python -c "from src import __version__; print(__version__)") .
-	docker tag linguistic-stratigraphy:$$(python -c "from src import __version__; print(__version__)") linguistic-stratigraphy:latest
+	docker build -t $(IMAGE):$$($(PYTHON) -c "from src import __version__; print(__version__)") .
+	docker tag $(IMAGE):$$($(PYTHON) -c "from src import __version__; print(__version__)") $(IMAGE):latest
 	@echo "Docker image built successfully"
 
 package-zip:
 	@mkdir -p dist
-	zip -r dist/linguistic-stratigraphy-$$(python -c "from src import __version__; print(__version__)").zip \
+	zip -r dist/linguistic-stratigraphy-$$($(PYTHON) -c "from src import __version__; print(__version__)").zip \
 		src/ requirements.txt requirements-dev.txt pyproject.toml README.md LICENSE \
 		Makefile Dockerfile docker-compose.yml config/ scripts/ \
 		-x "*.pyc" -x "*/__pycache__/*" -x "*.egg-info/*"
@@ -252,7 +319,7 @@ package-all: clean dist docker-image package-zip
 	@echo "All packages built:"
 	@ls -la dist/
 	@echo ""
-	@docker images linguistic-stratigraphy --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
+	@docker images $(IMAGE) --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
 
 # =============================================================================
 # Release Commands

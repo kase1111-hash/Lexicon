@@ -44,6 +44,8 @@ ENV/
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 .tox/
 .nox/
@@ -56,6 +58,16 @@ htmlcov/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Downloaded source data and generated reference files (data/corpus/ and
+# data/seed_words_eng.txt are tracked samples)
+data/wold/
+data/clics/
+data/semantic_fields.json
+data/languages_pending.json
+
+# Release archives (make release-archive)
+releases/
 
 # OS
 .DS_Store

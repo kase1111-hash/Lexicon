@@ -19,10 +19,17 @@ LSR_CACHE_TTL = 600  # 10 minutes
 SEARCH_CACHE_TTL = 180  # 3 minutes
 GRAPH_CACHE_TTL = 300  # 5 minutes
 
+# Cached API responses built from the graph: search results and LSR records
+GRAPH_CACHE_PATTERNS = ("lexicon:search:*", "lexicon:lsr:*")
+
 
 def make_cache_key(prefix: str, *args: Any, **kwargs: Any) -> str:
     """
     Generate a cache key from prefix and arguments.
+
+    Values keep their JSON type, so None, the string "None" and the number
+    1 vs the string "1" give different keys; other objects (UUIDs, dates)
+    are keyed by str().
 
     Args:
         prefix: Key prefix (e.g., 'lsr', 'search').
@@ -33,11 +40,8 @@ def make_cache_key(prefix: str, *args: Any, **kwargs: Any) -> str:
         A unique cache key string.
     """
     # Create a deterministic representation
-    key_data = {
-        "args": [str(a) for a in args],
-        "kwargs": {k: str(v) for k, v in sorted(kwargs.items())},
-    }
-    key_str = json.dumps(key_data, sort_keys=True)
+    key_data = {"args": list(args), "kwargs": kwargs}
+    key_str = json.dumps(key_data, sort_keys=True, default=str)
 
     # Hash for consistent length
     key_hash = hashlib.md5(key_str.encode(), usedforsecurity=False).hexdigest()[:16]
@@ -160,19 +164,7 @@ class CacheManager:
             if not db._redis_client:
                 return 0
 
-            # Scan for matching keys
-            cursor = 0
-            deleted = 0
-
-            while True:
-                cursor, keys = await db.redis.scan(cursor, match=pattern, count=100)
-                if keys:
-                    await db.redis.delete(*keys)
-                    deleted += len(keys)
-                if cursor == 0:
-                    break
-
-            return deleted
+            return await _delete_matching(db.redis, pattern)
 
         except Exception as e:
             logger.debug(f"Cache delete pattern error for {pattern}: {e}")
@@ -185,6 +177,35 @@ class CacheManager:
     def enable(self) -> None:
         """Enable caching."""
         self._enabled = True
+
+
+async def _delete_matching(redis: Any, pattern: str) -> int:
+    """Delete the keys matching a pattern (SCAN, so Redis is never blocked)."""
+    cursor = 0
+    deleted = 0
+    while True:
+        cursor, keys = await redis.scan(cursor, match=pattern, count=100)
+        if keys:
+            await redis.delete(*keys)
+            deleted += len(keys)
+        if cursor == 0:
+            return deleted
+
+
+async def invalidate_graph_caches(redis: Any) -> int:
+    """Drop every cached search result and LSR record.
+
+    For writers outside the API (ingestion): the API invalidates on its own
+    writes, but would otherwise serve responses cached before an ingestion
+    for up to LSR_CACHE_TTL seconds.
+
+    Args:
+        redis: An async Redis client connected to the API's cache.
+
+    Returns:
+        Number of cache entries deleted.
+    """
+    return sum([await _delete_matching(redis, pattern) for pattern in GRAPH_CACHE_PATTERNS])
 
 
 # Global cache manager instance

@@ -4,6 +4,9 @@ These tests ensure configuration and validation
 handle edge cases correctly without breaking.
 """
 
+import os
+from unittest.mock import patch
+
 import pytest
 
 from src.config import (
@@ -33,7 +36,11 @@ class TestConfigurationEdgeCases:
 
     def test_database_config_defaults(self):
         """Test database config uses correct defaults."""
-        config = DatabaseConfig()
+        # DatabaseConfig reads NEO4J_URI etc. from the environment; clear them
+        db_keys = ("NEO4J_", "POSTGRES_", "REDIS_", "ELASTICSEARCH_")
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith(db_keys)}
+        with patch.dict(os.environ, clean_env, clear=True):
+            config = DatabaseConfig()
         assert config.neo4j_uri == "bolt://localhost:7687"
         assert config.postgres_host == "localhost"
         assert config.postgres_port == 5432

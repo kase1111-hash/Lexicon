@@ -13,6 +13,8 @@ from uuid import UUID
 
 from Levenshtein import ratio as levenshtein_ratio
 
+from src.utils.languages import CODE_TO_LANGUAGE, LANGUAGE_CODE_MAP
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,47 +56,6 @@ class RawRelationship:
     evidence: str
     is_reconstructed: bool = False
 
-
-# Language name -> ISO 639-3 code mapping (shared with wiktionary adapter)
-LANGUAGE_CODE_MAP = {
-    "English": "eng",
-    "French": "fra",
-    "German": "deu",
-    "Spanish": "spa",
-    "Italian": "ita",
-    "Portuguese": "por",
-    "Dutch": "nld",
-    "Russian": "rus",
-    "Polish": "pol",
-    "Latin": "lat",
-    "Ancient Greek": "grc",
-    "Greek": "ell",
-    "Old English": "ang",
-    "Middle English": "enm",
-    "Old French": "fro",
-    "Middle French": "frm",
-    "Old Norse": "non",
-    "Old High German": "goh",
-    "Middle High German": "gmh",
-    "Middle Dutch": "dum",
-    "Proto-Germanic": "gem-pro",
-    "Proto-Indo-European": "ine-pro",
-    "Proto-Slavic": "sla-pro",
-    "Proto-Romance": "roa-pro",
-    "Proto-Celtic": "cel-pro",
-    "Sanskrit": "san",
-    "Arabic": "ara",
-    "Hebrew": "heb",
-    "Japanese": "jpn",
-    "Chinese": "zho",
-    "Korean": "kor",
-    "Norman": "nrf",
-    "Anglo-Norman": "xno",
-    "Vulgar Latin": "la-vul",
-}
-
-# Build reverse map for code -> name
-CODE_TO_LANGUAGE = {v: k for k, v in LANGUAGE_CODE_MAP.items()}
 
 # Patterns that indicate borrowing vs. inheritance
 BORROWING_INDICATORS = {
@@ -440,11 +401,19 @@ class RelationshipExtractor:
 
         return relationship
 
-    def process_new_lsrs(self, lsr_ids: list[UUID]) -> list[ExtractedRelationship]:
-        """Process newly created LSRs for relationship extraction.
+    def process_new_lsrs(
+        self, lsr_ids: list[UUID], include_cognates: bool = False
+    ) -> list[ExtractedRelationship]:
+        """Extract relationships for newly created LSRs.
+
+        Etymology text yields DESCENDS_FROM / BORROWED_FROM edges to LSRs
+        already in the store. Form-similarity cognate detection compares
+        every pair and matches unrelated look-alikes, so it only runs when
+        explicitly requested.
 
         Args:
             lsr_ids: List of new LSR UUIDs to process.
+            include_cognates: Also run form-similarity cognate detection.
 
         Returns:
             List of all extracted relationships.
@@ -456,16 +425,13 @@ class RelationshipExtractor:
             if not lsr:
                 continue
 
-            # Extract from etymology text
             etymology = getattr(lsr, "etymology_text", "") or ""
             if etymology:
-                rels = self.extract_from_etymology(lsr_id, etymology)
-                all_relationships.extend(rels)
+                all_relationships.extend(self.extract_from_etymology(lsr_id, etymology))
 
-            # Detect cognates with all other LSRs
-            other_ids = [uid for uid in self._lsr_store if uid != lsr_id]
-            cognates = self.detect_cognates(lsr_id, other_ids)
-            all_relationships.extend(cognates)
+            if include_cognates:
+                other_ids = [uid for uid in self._lsr_store if uid != lsr_id]
+                all_relationships.extend(self.detect_cognates(lsr_id, other_ids))
 
         return all_relationships
 
@@ -519,16 +485,15 @@ class RelationshipExtractor:
         resolved: list[ExtractedRelationship] = []
 
         for raw in raw_rels:
-            target_ids = self._form_index.get(
-                f"{raw.target_form.lower()}:{raw.target_language_code}", []
-            )
-
-            if not target_ids:
-                # Try without language code
-                for key, ids in self._form_index.items():
-                    if key.startswith(f"{raw.target_form.lower()}:"):
-                        target_ids = ids
-                        break
+            # Match on form AND language only: a same-spelled word in another
+            # language is a different word
+            target_ids = [
+                target_id
+                for target_id in self._form_index.get(
+                    f"{raw.target_form.lower()}:{raw.target_language_code}", []
+                )
+                if target_id != source_id
+            ]
 
             if target_ids:
                 # Use first match (could be improved with better ranking)

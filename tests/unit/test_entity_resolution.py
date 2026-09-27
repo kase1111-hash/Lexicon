@@ -244,7 +244,20 @@ class TestConvertEntryToLSR:
         lsr = convert_entry_to_lsr(entry)
 
         assert lsr.date_start == 1500
-        assert lsr.date_end == 1500
+        # Earliest attestation only; the word is not known to have died out
+        assert lsr.date_end is None
+
+    def test_conversion_id_is_deterministic(self):
+        """Re-converting the same source record yields the same LSR id."""
+        entry = RawLexicalEntry(
+            source_name="corpus", source_id="corp-1", form="word", language="English"
+        )
+        assert convert_entry_to_lsr(entry).id == convert_entry_to_lsr(entry).id
+
+    def test_conversion_maps_language_name_to_iso(self):
+        """Language names map to real ISO 639-3 codes, not name prefixes."""
+        entry = RawLexicalEntry(source_name="t", source_id="1", form="Wasser", language="German")
+        assert convert_entry_to_lsr(entry).language_code == "deu"
 
     def test_conversion_derives_language_code(self):
         """Test that language code is derived from language name if not provided."""

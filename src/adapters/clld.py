@@ -15,6 +15,7 @@ https://wold.clld.org/. The key tables are:
 
 import csv
 import logging
+import re
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
@@ -22,16 +23,20 @@ from typing import Any
 
 import httpx
 
+from src.utils.languages import LANGUAGE_CODE_MAP, language_filter_keys
+
 from .base import RawLexicalEntry, SourceAdapter
 
 logger = logging.getLogger(__name__)
 
-# WOLD borrowing scores map to confidence:
-# 1 = clearly borrowed (high confidence)
-# 2 = probably borrowed
-# 3 = perhaps borrowed
-# 4 = very little evidence for borrowing
-# 5 = no evidence for borrowing (inherited)
+# WOLD borrowing categories map to confidence. forms.csv carries the category
+# as text in `Borrowed` ("1. clearly borrowed") and as a continuous
+# `Borrowed_score` where HIGHER means more likely borrowed:
+# 1 = clearly borrowed          (Borrowed_score 1.0)
+# 2 = probably borrowed         (0.75)
+# 3 = perhaps borrowed          (0.5)
+# 4 = very little evidence      (0.25)
+# 5 = no evidence (inherited)   (0.0)
 WOLD_BORROWING_CONFIDENCE = {
     1: 0.95,
     2: 0.80,
@@ -39,6 +44,185 @@ WOLD_BORROWING_CONFIDENCE = {
     4: 0.30,
     5: 0.10,
 }
+
+# Categories 1-3 count as borrowings
+WOLD_BORROWED_MAX_CATEGORY = 3
+
+# English `Age` labels for inherited vocabulary. The English word itself is
+# attested from the Old English period; the label names how far back the
+# etymon goes. Values are (earliest year for the English form, period label).
+_ENGLISH_PERIOD_AGES: dict[str, tuple[int, str]] = {
+    "proto-indo-european": (700, "Old English (inherited from Proto-Indo-European)"),
+    "proto-germanic": (700, "Old English (inherited from Proto-Germanic)"),
+    "proto-west germanic": (700, "Old English (inherited from Proto-West Germanic)"),
+    "germanic": (700, "Old English (inherited from Germanic)"),
+    "frisian-old english": (700, "Old English"),
+    "early old english": (700, "Early Old English"),
+    "old english": (700, "Old English"),
+    "late old english": (900, "Late Old English"),
+}
+
+# Japanese periods used by WOLD (standard periodization, start years)
+_JAPANESE_PERIOD_AGES: dict[str, int] = {
+    "old japanese": 700,
+    "late old japanese": 800,
+    "middle japanese": 1100,
+    "early modern japanese": 1600,
+    "modern japanese": 1868,
+}
+
+_AGE_YEAR_RE = re.compile(
+    r"^(?P<prefix>c\.|ca\.|circa|before|pre-?)?\s*(?P<start>\d{3,4})"
+    r"(?:\s*[-–]\s*(?P<end>\d{3,4}|present))?$",
+    re.IGNORECASE,
+)
+_PARENTHESIZED_RE = re.compile(r"\([^)]*\)")
+_AGE_CENTURY_RE = re.compile(
+    r"^(?:(?P<part>early|mid|late)[-\s])?(?P<n>\d{1,2})(?:st|nd|rd|th)"
+    r"(?:\s*/\s*\d{1,2}(?:st|nd|rd|th))? century$",
+    re.IGNORECASE,
+)
+_CENTURY_PART_OFFSET = {"early": 0, "mid": 33, "late": 66}
+
+# WOLD donor language names -> graph codes, consulted before WOLD's own
+# language list and LANGUAGE_CODE_MAP (see CLLDAdapter._donor_language_code).
+# Latin varieties use the Wiktionary codes of src.utils.languages.
+WOLD_DONOR_LANGUAGE_CODES: dict[str, str] = {
+    "Latin": "lat",
+    "Late Latin": "la-lat",
+    "Vulgar Latin": "la-vul",
+    "Medieval Latin": "la-med",
+    "Neo-Latin": "la-new",
+    "French": "fra",
+    "Old French": "fro",
+    "Middle French": "frm",
+    "French (Anglo-Norman)": "xno",
+    "Anglo-Norman": "xno",
+    "Old Norse": "non",
+    "English": "eng",
+    "Old English": "ang",
+    "Middle English": "enm",
+    "Dutch": "nld",
+    "Middle Dutch": "dum",
+    "Middle Low German": "gml",
+    "German": "deu",
+    "New High German": "deu",
+    "Spanish": "spa",
+    "Portuguese": "por",
+    "Italian": "ita",
+    "Greek": "ell",
+    "Ancient Greek": "grc",
+    "Arabic": "ara",
+    "Classical Arabic": "ara",
+    "Standard Arabic": "ara",
+    "Persian": "fas",
+    "Sanskrit": "san",
+    "Russian": "rus",
+    "Chinese": "zho",
+    "Turkish": "tur",
+    "Hungarian": "hun",
+    "Malay": "msa",
+    "Welsh": "cym",
+    "Gaelic (Scottish)": "gla",
+    "Irish": "gle",
+    "Swahili": "swh",
+}
+
+
+def parse_wold_age(age: str, language_name: str = "") -> tuple[int | None, str, float]:
+    """Parse a WOLD `Age` value into an earliest-attestation year.
+
+    Handles the formats WOLD uses for dated words ("1835", "c. 1300",
+    "before 1225", "Pre-1606", "1432-1450", "1940-present", "14th century",
+    "mid-20th century"), the English period labels used for inherited
+    vocabulary ("Proto-Germanic", "Old English") and the Japanese periods
+    ("Middle Japanese"). Other free-text labels ("Modern", language-specific
+    strata, dictionary citations) are not guessed at.
+
+    Args:
+        age: Raw `Age` cell from forms.csv.
+        language_name: Recipient language name (period labels are
+            only interpreted for English).
+
+    Returns:
+        (year or None, period label, date confidence 0-1).
+    """
+    text = (age or "").strip()
+    if not text:
+        return None, "", 0.0
+
+    match = _AGE_YEAR_RE.match(text)
+    if match:
+        year = int(match.group("start"))
+        prefix = (match.group("prefix") or "").lower()
+        if prefix in ("before", "pre", "pre-"):
+            confidence = 0.7
+        elif prefix or match.group("end"):
+            confidence = 0.9
+        else:
+            confidence = 1.0
+        return year, text, confidence
+
+    match = _AGE_CENTURY_RE.match(text)
+    if match:
+        century = int(match.group("n"))
+        offset = _CENTURY_PART_OFFSET.get((match.group("part") or "").lower(), 0)
+        return (century - 1) * 100 + offset, text, 0.6
+
+    if language_name == "English":
+        period = _ENGLISH_PERIOD_AGES.get(text.lower())
+        if period:
+            return period[0], period[1], 0.5
+    if language_name == "Japanese" and text.lower() in _JAPANESE_PERIOD_AGES:
+        return _JAPANESE_PERIOD_AGES[text.lower()], text, 0.5
+
+    return None, text, 0.0
+
+
+def _borrowing_category(form: dict[str, str]) -> int | None:
+    """Return the WOLD borrowing category (1-5) for a forms.csv row."""
+    label = form.get("Borrowed", "").strip()
+    if label[:1].isdigit():
+        return int(label[0])
+
+    score_str = form.get("Borrowed_score", "").strip()
+    if not score_str:
+        return None
+    try:
+        score = float(score_str)
+    except ValueError:
+        return None
+    # Borrowed_score: 1.0 clearly ... 0.0 no evidence
+    return max(1, min(5, round(5 - score * 4)))
+
+
+_NUMBERED_MEANING_RE = re.compile(r"\s*\(\d+\)$")
+_QUALIFIED_GLOSS_RE = re.compile(r"^(?P<head>.*?)\s*\((?P<qualifier>[^)]*)\)\s*$")
+
+
+def wold_meaning_definition(meaning: dict[str, str]) -> str:
+    """A WOLD meaning's name, as a definition.
+
+    WOLD numbers meanings that share a name ("male(1)", "male(2)"). The
+    number is replaced by what the Concepticon gloss says about the sense:
+    its qualifier when it qualifies the same word ("MALE (OF PERSON)" ->
+    "male (of person)"), otherwise the gloss itself ("SPRINGTIME" ->
+    "the spring (springtime)", "CORRECT (RIGHT)" -> "right (correct)").
+    """
+    name = (meaning.get("Name") or "").strip()
+    base = _NUMBERED_MEANING_RE.sub("", name)
+    if base == name:
+        return name
+    word = base.removeprefix("the ").removeprefix("to ").lower()
+    gloss = (meaning.get("Concepticon_Gloss") or "").strip().lower()
+    qualified = _QUALIFIED_GLOSS_RE.match(gloss)
+    if qualified:
+        head, qualifier = qualified.group("head"), qualified.group("qualifier")
+        sense = qualifier if head == word else head
+    else:
+        sense = gloss if gloss != word else ""
+    return f"{base} ({sense})" if sense else base
+
 
 # WOLD language name -> ISO 639-3 code (subset, extended at runtime from data)
 WOLD_LANGUAGE_CODES: dict[str, str] = {
@@ -114,6 +298,11 @@ class WOLDData:
         self.forms: list[dict[str, str]] = []
         self.languages: dict[str, dict[str, str]] = {}  # id -> language info
         self.meanings: dict[str, dict[str, str]] = {}  # id -> meaning info
+        # form id -> donor rows from borrowings.csv
+        self.donors: dict[str, list[dict[str, str]]] = {}
+        # WOLD language name / glottocode -> its ISO 639-3 code
+        self.iso_by_name: dict[str, str] = {}
+        self.iso_by_glottocode: dict[str, str] = {}
         self.total_count: int = 0
         self.loaded: bool = False
 
@@ -139,7 +328,10 @@ class CLLDAdapter(SourceAdapter):
         "forms": "forms.csv",
         "languages": "languages.csv",
         "parameters": "parameters.csv",  # meanings/concepts
+        "borrowings": "borrowings.csv",  # donor language/word per borrowed form
     }
+    # Files the adapter can run without (older local copies may lack them)
+    OPTIONAL_FILES = frozenset({"borrowings"})
 
     def __init__(
         self,
@@ -151,8 +343,9 @@ class CLLDAdapter(SourceAdapter):
         Args:
             data_dir: Directory containing WOLD CSV files. If files
                 don't exist, they will be downloaded.
-            languages_filter: Optional list of language names to include.
-                If None, all languages are included.
+            languages_filter: Optional list of languages to include, as names,
+                ISO 639-3 or ISO 639-1 codes, or Glottolog codes. If None, all
+                languages are included.
         """
         self.data_dir = Path(data_dir) if data_dir else Path("data/wold")
         self.languages_filter = languages_filter
@@ -243,8 +436,8 @@ class CLLDAdapter(SourceAdapter):
     def fetch_borrowings(self) -> Iterator[RawLexicalEntry]:
         """Fetch only entries that are identified as borrowings.
 
-        Yields entries with WOLD borrowing scores 1-3 (clearly/probably/perhaps
-        borrowed), which have the most linguistic value.
+        Yields entries in WOLD borrowing categories 1-3 (clearly/probably/
+        perhaps borrowed), which have the most linguistic value.
 
         Yields:
             RawLexicalEntry objects for borrowed forms.
@@ -253,16 +446,8 @@ class CLLDAdapter(SourceAdapter):
             raise RuntimeError("Adapter not connected. Call connect() first.")
 
         for form in self._data.forms:
-            score_str = form.get("Borrowed_score", "")
-            if not score_str:
-                continue
-            try:
-                score = float(score_str)
-            except (ValueError, TypeError):
-                continue
-
-            # Only yield forms with meaningful borrowing evidence (score <= 3)
-            if score <= 3.0:
+            category = _borrowing_category(form)
+            if category is not None and category <= WOLD_BORROWED_MAX_CATEGORY:
                 entry = self._convert_form(form)
                 if entry is not None:
                     yield entry
@@ -279,7 +464,12 @@ class CLLDAdapter(SourceAdapter):
 
             url = f"{self.WOLD_BASE_URL}/{filename}"
             logger.info(f"Downloading WOLD {key}: {url}")
-            self._download_file(url, filepath)
+            try:
+                self._download_file(url, filepath)
+            except ConnectionError as e:
+                if key not in self.OPTIONAL_FILES:
+                    raise
+                logger.warning(f"Continuing without WOLD {key}: {e}")
 
     def _download_file(self, url: str, filepath: Path, max_retries: int = 3) -> None:
         """Download a file with retry logic.
@@ -300,7 +490,8 @@ class CLLDAdapter(SourceAdapter):
                 filepath.write_bytes(response.content)
                 logger.info(f"Downloaded {filepath.name} ({len(response.content)} bytes)")
                 return
-            except (httpx.ConnectError, httpx.ReadTimeout, httpx.HTTPStatusError) as e:
+            except httpx.HTTPError as e:
+                # Any transport failure (proxy, timeout, protocol) or HTTP error status
                 last_error = e
                 wait = (attempt + 1) * 2
                 logger.warning(
@@ -311,7 +502,9 @@ class CLLDAdapter(SourceAdapter):
 
                 time.sleep(wait)
 
-        raise RuntimeError(f"Failed to download {url} after {max_retries} retries: {last_error}")
+        raise ConnectionError(
+            f"Failed to download {url} after {max_retries} attempts: {last_error}"
+        )
 
     def _load_data(self) -> None:
         """Load and parse all WOLD CSV files into memory."""
@@ -320,6 +513,15 @@ class CLLDAdapter(SourceAdapter):
         if lang_path.exists():
             self._data.languages = self._load_csv_indexed(lang_path, "ID")
             logger.info(f"Loaded {len(self._data.languages)} WOLD languages")
+        for info in self._data.languages.values():
+            iso = info.get("ISO639P3code", "")
+            name, glottocode = info.get("Name", ""), info.get("Glottocode", "")
+            # A blank name or glottocode must not become a key that a donor
+            # row with the same blank would match
+            if iso and name:
+                self._data.iso_by_name[name] = iso
+            if iso and glottocode:
+                self._data.iso_by_glottocode[glottocode] = iso
 
         # Load meanings/parameters
         params_path = self.data_dir / self.WOLD_FILES["parameters"]
@@ -327,18 +529,36 @@ class CLLDAdapter(SourceAdapter):
             self._data.meanings = self._load_csv_indexed(params_path, "ID")
             logger.info(f"Loaded {len(self._data.meanings)} WOLD meanings")
 
+        # Load donor information for borrowed forms
+        borrowings_path = self.data_dir / self.WOLD_FILES["borrowings"]
+        if borrowings_path.exists():
+            for row in self._load_csv_list(borrowings_path):
+                target = row.get("Target_Form_ID", "")
+                if target:
+                    self._data.donors.setdefault(target, []).append(row)
+            logger.info(f"Loaded donor data for {len(self._data.donors)} WOLD forms")
+
         # Load forms (the main data)
         forms_path = self.data_dir / self.WOLD_FILES["forms"]
         if forms_path.exists():
             all_forms = self._load_csv_list(forms_path)
             # Apply language filter if set
             if self.languages_filter:
+                # Names or codes (the graph code, e.g. "goh" for Old High
+                # German, or a glottocode); ISO 639-1 codes ("en") map to 639-3
+                wanted = language_filter_keys(self.languages_filter)
                 filtered = []
                 for form in all_forms:
                     lang_id = form.get("Language_ID", "")
                     lang_info = self._data.languages.get(lang_id, {})
-                    lang_name = lang_info.get("Name", "")
-                    if lang_name in self.languages_filter:
+                    lang_name = lang_info.get("Name", lang_id)
+                    names = {
+                        lang_name.lower(),
+                        lang_info.get("Glottocode", "").lower(),
+                        self._language_code(lang_info, lang_name).lower(),
+                        WOLD_LANGUAGE_CODES.get(lang_name, ""),
+                    }
+                    if wanted & names:
                         filtered.append(form)
                 self._data.forms = filtered
             else:
@@ -393,7 +613,11 @@ class CLLDAdapter(SourceAdapter):
         Returns:
             RawLexicalEntry or None if the form is invalid/empty.
         """
-        word = form.get("Form", "").strip()
+        # `Value` is the surface form; CLDF `Form` uses underscores for spaces.
+        # Parenthesized parts are sense numbers or optional material
+        # ("call (1)", "(sea)gull", "wood(s)"); the headword is the rest.
+        value = (form.get("Value") or form.get("Form", "").replace("_", " ")).strip()
+        word = " ".join(_PARENTHESIZED_RE.sub(" ", value).split()) or value
         if not word:
             return None
 
@@ -401,68 +625,67 @@ class CLLDAdapter(SourceAdapter):
         lang_id = form.get("Language_ID", "")
         lang_info = self._data.languages.get(lang_id, {})
         lang_name = lang_info.get("Name", lang_id)
-        lang_code = lang_info.get("ISO639P3code", "")
-
-        # Fall back to our known codes if ISO not in the data
-        if not lang_code:
-            lang_code = WOLD_LANGUAGE_CODES.get(lang_name, "")
+        lang_code = self._language_code(lang_info, lang_name)
 
         # Resolve meaning/parameter
         param_id = form.get("Parameter_ID", "")
         meaning_info = self._data.meanings.get(param_id, {})
-        definition = meaning_info.get("Name", "")
+        definition = wold_meaning_definition(meaning_info)
         semantic_field_id = param_id.split("-")[0] if "-" in param_id else param_id
         semantic_field = WOLD_SEMANTIC_FIELDS.get(semantic_field_id, "")
 
         # Borrowing metadata
         borrowed_score_str = form.get("Borrowed_score", "")
-        donor_language = form.get("source_language", "") or form.get("Donor_language", "")
+        category = _borrowing_category(form)
+        is_borrowed = category is not None and category <= WOLD_BORROWED_MAX_CATEGORY
+        borrowing_confidence = WOLD_BORROWING_CONFIDENCE.get(category, 0.0) if category else 0.0
 
-        # Parse borrowing score
-        borrowing_confidence = 0.0
-        is_borrowed = False
-        if borrowed_score_str:
-            try:
-                score = float(borrowed_score_str)
-                # Continuous score: lower = more likely borrowed
-                # Map to our confidence scale
-                if score <= 1.0:
-                    borrowing_confidence = 0.95
-                    is_borrowed = True
-                elif score <= 2.0:
-                    borrowing_confidence = 0.80
-                    is_borrowed = True
-                elif score <= 3.0:
-                    borrowing_confidence = 0.60
-                    is_borrowed = True
-                elif score <= 4.0:
-                    borrowing_confidence = 0.30
-                else:
-                    borrowing_confidence = 0.10
-            except (ValueError, TypeError):
-                pass
+        # Earliest attestation from the `Age` column
+        date_attested, period_label, date_confidence = parse_wold_age(
+            form.get("Age", ""), lang_name
+        )
 
         # Build definitions list
         definitions = [definition] if definition else []
 
-        # Build related_forms for borrowing relationships
+        # Build related_forms from borrowings.csv donor rows. Only the
+        # immediate donor becomes a BORROWED_FROM edge; earlier stages of
+        # the loan history are kept in the etymology text.
+        form_id = form.get("ID", f"{lang_id}-{word}")
         related_forms: list[dict[str, Any]] = []
-        if is_borrowed and donor_language:
-            related_forms.append(
-                {
-                    "type": "borrowed_from",
-                    "language": donor_language,
-                    "confidence": borrowing_confidence,
-                }
-            )
+        donor_notes: list[str] = []
+        if is_borrowed:
+            for donor in self._data.donors.get(form_id, []):
+                donor_lang = donor.get("Source_languoid", "").strip()
+                donor_word = donor.get("Source_word", "").strip()
+                if not donor_lang or donor_lang == "Unidentified":
+                    continue
+                relation = donor.get("Source_relation", "immediate") or "immediate"
+                certain = donor.get("Source_certain", "yes") != "no"
+                note = f"{donor_lang} {donor_word}".strip()
+                donor_notes.append(note if relation == "immediate" else f"earlier {note}")
+                if relation != "immediate" or not donor_word:
+                    continue
+                related_forms.append(
+                    {
+                        "type": "borrowed_from",
+                        "form": donor_word,
+                        "language": donor_lang,
+                        "language_code": self._donor_language_code(donor),
+                        "meaning": donor.get("Source_meaning", ""),
+                        "certain": certain,
+                        "confidence": round(borrowing_confidence * (1.0 if certain else 0.7), 3),
+                    }
+                )
+        donor_language = related_forms[0]["language"] if related_forms else ""
 
         # Build etymology text from borrowing data
         etymology = None
-        if is_borrowed and donor_language:
-            etymology = f"Borrowed from {donor_language} (WOLD score: {borrowed_score_str})"
+        if is_borrowed:
+            label = form.get("Borrowed", "").split(". ", 1)[-1] or "borrowed"
+            source = f" from {'; '.join(donor_notes)}" if donor_notes else ""
+            etymology = f"Borrowed{source} (WOLD: {label})"
 
-        # Generate source ID
-        form_id = form.get("ID", f"{lang_id}-{word}")
         source_id = f"wold-{form_id}"
 
         return RawLexicalEntry(
@@ -474,20 +697,59 @@ class CLLDAdapter(SourceAdapter):
             etymology=etymology,
             definitions=definitions,
             related_forms=related_forms,
+            date_attested=date_attested,
             raw_data={
                 "source": "wold",
                 "form_id": form_id,
+                "value": value,
                 "language_id": lang_id,
                 "parameter_id": param_id,
                 "borrowed_score": borrowed_score_str,
+                "borrowed_category": category,
                 "donor_language": donor_language,
                 "semantic_field": semantic_field,
                 "semantic_field_id": semantic_field_id,
                 "is_borrowed": is_borrowed,
                 "borrowing_confidence": borrowing_confidence,
+                "age": form.get("Age", ""),
+                "period_label": period_label,
+                "date_confidence": date_confidence,
                 "language_family": lang_info.get("Family", ""),
                 "language_glottocode": lang_info.get("Glottocode", ""),
             },
+        )
+
+    @staticmethod
+    def _language_code(lang_info: dict[str, str], lang_name: str) -> str:
+        """Graph language code for a WOLD (recipient) language.
+
+        Its ISO 639-3 code; otherwise a known code for its name, then its
+        Glottolog code, rather than dropping languages (e.g. Old High
+        German) that have no ISO code here.
+        """
+        return (
+            lang_info.get("ISO639P3code", "")
+            or WOLD_LANGUAGE_CODES.get(lang_name)
+            or LANGUAGE_CODE_MAP.get(lang_name)
+            or lang_info.get("Glottocode", "")
+        )
+
+    def _donor_language_code(self, donor: dict[str, str]) -> str:
+        """Graph language code for a borrowings.csv donor row.
+
+        Tried in order: WOLD_DONOR_LANGUAGE_CODES, the ISO code of the WOLD
+        language with the donor's name or glottocode (so a Hausa donor links
+        to the Hausa words WOLD itself lists), LANGUAGE_CODE_MAP, and only
+        then the donor's Glottolog code.
+        """
+        name = donor.get("Source_languoid", "").strip()
+        glottocode = donor.get("Source_languoid_glottocode", "").strip()
+        return (
+            WOLD_DONOR_LANGUAGE_CODES.get(name)
+            or self._data.iso_by_name.get(name)
+            or self._data.iso_by_glottocode.get(glottocode)
+            or LANGUAGE_CODE_MAP.get(name)
+            or glottocode
         )
 
     def get_language_stats(self) -> dict[str, int]:
@@ -525,24 +787,15 @@ class CLLDAdapter(SourceAdapter):
             "unscored": 0,
         }
 
+        names = {
+            1: "clearly_borrowed",
+            2: "probably_borrowed",
+            3: "perhaps_borrowed",
+            4: "little_evidence",
+            5: "no_evidence",
+        }
         for form in self._data.forms:
-            score_str = form.get("Borrowed_score", "")
-            if not score_str:
-                categories["unscored"] += 1
-                continue
-            try:
-                score = float(score_str)
-                if score <= 1.0:
-                    categories["clearly_borrowed"] += 1
-                elif score <= 2.0:
-                    categories["probably_borrowed"] += 1
-                elif score <= 3.0:
-                    categories["perhaps_borrowed"] += 1
-                elif score <= 4.0:
-                    categories["little_evidence"] += 1
-                else:
-                    categories["no_evidence"] += 1
-            except (ValueError, TypeError):
-                categories["unscored"] += 1
+            category = _borrowing_category(form)
+            categories[names.get(category, "unscored") if category else "unscored"] += 1
 
         return categories

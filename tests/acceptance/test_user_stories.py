@@ -184,34 +184,70 @@ class TestUserStoryTextDating:
         the lord surveyed his demesne.
         """
 
-    def test_date_text_returns_required_fields(self, sample_historical_text):
-        """Verify date-text response contains required fields."""
+    @pytest.fixture
+    def dated_lookup(self):
+        """First-attestation dates for a few English words (date_end None = in use)."""
+        return {
+            form: {"date_start": year, "date_end": None, "language_code": "eng"}
+            for form, year in {
+                "knight": 900,
+                "ride": 800,
+                "forth": 800,
+                "bear": 800,
+                "standard": 1138,
+                "battle": 1297,
+                "work": 800,
+                "field": 800,
+                "lord": 900,
+                "survey": 1400,
+                "computer": 1646,
+                "telephone": 1835,
+            }.items()
+        }
+
+    def test_date_text_returns_range_and_diagnostics(self, sample_historical_text, dated_lookup):
+        """A dated text gets a range bounded below by its newest word."""
         from src.analysis.dating import TextDating
 
-        dater = TextDating()
-        result = dater.date_text(sample_historical_text, "eng")
+        result = TextDating(dated_lookup).date_text(sample_historical_text, "eng")
 
-        # Verify structure (even with placeholder implementation)
-        assert hasattr(result, "predicted_range")
-        assert hasattr(result, "confidence")
-        assert hasattr(result, "diagnostic_vocabulary")
-        assert isinstance(result.predicted_range, tuple)
-        assert len(result.predicted_range) == 2
+        assert result.status == "ok"
+        assert result.predicted_range[0] == 1400  # "surveyed" -> survey (1400)
+        assert result.diagnostic_vocabulary[0]["word"] == "surveyed"
+        assert 0.0 < result.confidence <= 1.0
+        assert result.matched_tokens > 0
 
-    def test_detect_anachronisms_returns_verdict(self, sample_historical_text):
-        """Verify anachronism detection returns a verdict."""
+    def test_date_text_without_data_says_so(self, sample_historical_text):
+        """With no dated vocabulary there is no range and no confidence."""
         from src.analysis.dating import TextDating
 
-        dater = TextDating()
-        result = dater.detect_anachronisms(
-            sample_historical_text,
-            claimed_date=1300,
-            language="eng",
+        result = TextDating().date_text(sample_historical_text, "eng")
+
+        assert result.status == "insufficient_data"
+        assert result.predicted_range is None
+        assert result.confidence == 0.0
+
+    def test_detect_anachronisms_flags_later_words(self, dated_lookup):
+        """Words first attested after the claimed date are flagged."""
+        from src.analysis.dating import TextDating
+
+        result = TextDating(dated_lookup).detect_anachronisms(
+            "The knight rode forth and used the telephone", claimed_date=1300, language="eng"
         )
 
-        assert hasattr(result, "anachronisms")
-        assert hasattr(result, "verdict")
-        assert result.verdict in ["consistent", "suspicious", "anachronistic"]
+        assert result.verdict == "anachronistic"
+        assert [a["word"] for a in result.anachronisms] == ["telephone"]
+
+    def test_detect_anachronisms_without_data_is_not_consistent(self, sample_historical_text):
+        """Absence of evidence is not reported as a consistent text."""
+        from src.analysis.dating import TextDating
+
+        result = TextDating().detect_anachronisms(
+            sample_historical_text, claimed_date=1300, language="eng"
+        )
+
+        assert result.verdict == "insufficient_data"
+        assert result.confidence == 0.0
 
     def test_date_text_confidence_is_valid_range(self, sample_historical_text):
         """Verify confidence score is within valid range."""
