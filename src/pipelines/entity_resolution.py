@@ -3,15 +3,19 @@
 import logging
 from enum import StrEnum
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from pydantic import BaseModel, Field
 
 from src.adapters.base import RawLexicalEntry
-from src.models.lsr import LSR
+from src.models.lsr import LSR, YEAR_MAX, YEAR_MIN
+from src.utils.languages import LANGUAGE_CODE_MAP
 from src.utils.phonetics import PhoneticUtils
 
 logger = logging.getLogger(__name__)
+
+# Namespace for deterministic LSR ids derived from source records
+LSR_ID_NAMESPACE = UUID("8d3f7c5e-2b1a-5f4e-9c6d-4a7b8e9f0a1b")
 
 
 class ResolutionAction(StrEnum):
@@ -48,7 +52,7 @@ class EntityResolver:
     """
     Match incoming entries to existing LSRs or create new ones.
 
-    This pipeline implements the entity resolution logic from SPEC.md Section 4.1:
+    This pipeline implements the entity resolution logic from docs/archive/SPEC.md Section 4.1:
     1. Candidate Retrieval
     2. Similarity Scoring
     3. Resolution Actions
@@ -82,33 +86,29 @@ class EntityResolver:
 
         # These would be injected in production
         self._lsr_store: dict[UUID, LSR] = {}
+        # "form_normalized||language_code" -> LSR ids
         self._form_index: dict[str, list[UUID]] = {}
-        self._phonetic_index: dict[str, list[UUID]] = {}
 
     def set_lsr_store(self, store: dict[UUID, LSR]) -> None:
         """Set the LSR store for resolution lookups."""
         self._lsr_store = store
         self._rebuild_index()
 
-    def _rebuild_index(self) -> None:
-        """Rebuild the form and phonetic indices from the LSR store."""
-        self._form_index.clear()
-        self._phonetic_index.clear()
-        for lsr_id, lsr in self._lsr_store.items():
-            key = f"{lsr.form_normalized}{self.INDEX_KEY_SEPARATOR}{lsr.language_code}"
-            if key not in self._form_index:
-                self._form_index[key] = []
-            self._form_index[key].append(lsr_id)
-            for phonetic_key in self._phonetic_keys(lsr.form_normalized, lsr.language_code):
-                self._phonetic_index.setdefault(phonetic_key, []).append(lsr_id)
+    def add_lsr(self, lsr: LSR) -> None:
+        """Add one LSR to the store and indices without a full rebuild."""
+        self._lsr_store[lsr.id] = lsr
+        self._index_lsr(lsr.id, lsr)
 
-    def _phonetic_keys(self, form: str, language_code: str) -> list[str]:
-        """Build Soundex and Metaphone index keys for a form."""
-        keys = []
-        for code in (PhoneticUtils.soundex(form), PhoneticUtils.metaphone(form)):
-            if code:
-                keys.append(f"{code}{self.INDEX_KEY_SEPARATOR}{language_code}")
-        return keys
+    def _rebuild_index(self) -> None:
+        """Rebuild the form index from the LSR store."""
+        self._form_index.clear()
+        for lsr_id, lsr in self._lsr_store.items():
+            self._index_lsr(lsr_id, lsr)
+
+    def _index_lsr(self, lsr_id: UUID, lsr: LSR) -> None:
+        """Add one LSR to the form index."""
+        key = f"{lsr.form_normalized}{self.INDEX_KEY_SEPARATOR}{lsr.language_code}"
+        self._form_index.setdefault(key, []).append(lsr_id)
 
     def resolve(self, entry: RawLexicalEntry) -> ResolutionResult:
         """
@@ -165,37 +165,17 @@ class EntityResolver:
         """
         Retrieve candidate LSRs that might match the entry.
 
-        Uses multiple strategies:
-        1. Exact normalized form + language match
-        2. Fuzzy form matching (Levenshtein distance < 2)
-        3. Phonetic matching (Soundex/Metaphone)
+        Only LSRs with the same normalized form and language are candidates.
+        A candidate whose form differs gets no form_exact credit, so with
+        the default weights it scores below 0.2 (fuzzy) + 0.3 + 0.1 + 0.1
+        = 0.70, under the review threshold: fuzzy or phonetic look-alikes
+        could never change the outcome, and comparing every entry with
+        every stored form made resolution quadratic in vocabulary size.
         """
-        candidates: set[UUID] = set()
-
-        # Normalize the form
         form_normalized = PhoneticUtils.strip_diacritics(entry.form.lower())
-        language_code = entry.language_code or entry.language[:3].lower()
-
-        # Strategy 1: Exact match
+        language_code = resolve_language_code(entry.language, entry.language_code)
         exact_key = f"{form_normalized}{self.INDEX_KEY_SEPARATOR}{language_code}"
-        if exact_key in self._form_index:
-            candidates.update(self._form_index[exact_key])
-
-        # Strategy 2: Fuzzy matching on same language
-        for key, ids in self._form_index.items():
-            stored_form, stored_lang = key.rsplit(self.INDEX_KEY_SEPARATOR, 1)
-            if stored_lang != language_code:
-                continue
-            distance = PhoneticUtils.levenshtein_distance(form_normalized, stored_form)
-            if distance <= 2:
-                candidates.update(ids)
-
-        # Strategy 3: Phonetic matching (Soundex/Metaphone)
-        for phonetic_key in self._phonetic_keys(form_normalized, language_code):
-            if phonetic_key in self._phonetic_index:
-                candidates.update(self._phonetic_index[phonetic_key])
-
-        return list(candidates)
+        return list(dict.fromkeys(self._form_index.get(exact_key, [])))
 
     def _calculate_similarity(
         self, entry: RawLexicalEntry, candidate: LSR
@@ -314,9 +294,37 @@ class EntityResolver:
         return merge_log
 
 
+def lsr_id_for_entry(entry: RawLexicalEntry) -> UUID:
+    """Deterministic LSR id for a source entry.
+
+    Re-ingesting the same source record yields the same id, so writes to
+    the graph are idempotent upserts rather than duplicates.
+    """
+    return uuid5(LSR_ID_NAMESPACE, f"{entry.source_name}:{entry.source_id}")
+
+
+def resolve_language_code(language: str, language_code: str = "") -> str:
+    """Return an ISO 639-3 code for a language name, or "" if unknown."""
+    if language_code:
+        return language_code
+    if language in LANGUAGE_CODE_MAP:
+        return LANGUAGE_CODE_MAP[language]
+    # Already a code (e.g. "eng")
+    if len(language) == 3 and language.isalpha() and language.islower():
+        return language
+    return ""
+
+
 def convert_entry_to_lsr(entry: RawLexicalEntry) -> LSR:
     """
     Convert a RawLexicalEntry to an LSR.
+
+    ``date_attested`` is the earliest attestation, so it becomes
+    ``date_start``; ``date_end`` stays unset, meaning the form is not
+    known to have fallen out of use. A year outside the range an LSR can
+    hold is dropped with a warning. An undated entry gets date_confidence
+    0.0 and keeps the source's own age label (e.g. WOLD "Pre 100 CE") as
+    its period_label.
 
     Args:
         entry: The raw entry to convert.
@@ -324,19 +332,36 @@ def convert_entry_to_lsr(entry: RawLexicalEntry) -> LSR:
     Returns:
         A new LSR instance.
     """
-    lsr = LSR(
+    raw = entry.raw_data or {}
+    semantic_field = raw.get("semantic_field")
+    date_start = entry.date_attested
+    if date_start is not None and not YEAR_MIN <= date_start <= YEAR_MAX:
+        logger.warning(
+            f"Dropping attestation year {date_start} of {entry.source_name} entry "
+            f"'{entry.form}' ({entry.source_id}): outside {YEAR_MIN}..{YEAR_MAX}"
+        )
+        date_start = None
+    if date_start is None:
+        date_confidence = 0.0
+    elif raw.get("date_confidence") is not None:
+        date_confidence = float(raw["date_confidence"])
+    else:
+        date_confidence = 1.0
+
+    return LSR(
+        id=lsr_id_for_entry(entry),
         form_orthographic=entry.form,
         form_phonetic=entry.form_phonetic,
-        language_code=entry.language_code or entry.language[:3].lower(),
+        language_code=resolve_language_code(entry.language, entry.language_code),
         language_name=entry.language,
+        language_family=raw.get("language_family") or "",
         definition_primary=entry.definitions[0] if entry.definitions else "",
         definitions_alternate=entry.definitions[1:] if len(entry.definitions) > 1 else [],
         part_of_speech=entry.part_of_speech,
+        semantic_fields=[semantic_field] if semantic_field else [],
+        etymology_text=entry.etymology or "",
         source_databases=[entry.source_name],
+        date_start=date_start,
+        date_confidence=date_confidence,
+        period_label=raw.get("period_label") or "",
     )
-
-    if entry.date_attested:
-        lsr.date_start = entry.date_attested
-        lsr.date_end = entry.date_attested
-
-    return lsr

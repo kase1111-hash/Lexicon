@@ -8,38 +8,62 @@ from datetime import datetime
 
 import httpx
 
+from src.models.lsr import YEAR_MIN
+from src.utils.languages import (
+    LANGUAGE_CODE_MAP,
+    graph_language_code,
+    language_filter_keys,
+    language_name,
+)
+
 from .base import RawLexicalEntry, SourceAdapter
 
 logger = logging.getLogger(__name__)
 
+# Era marker after a year or century: BC, BCE, B.C., B.C.E.
+_BCE = r"\s*B\.?\s?C\.?(?:\s?E\.?)?(?![a-z])"
+
+# {{name|param|...}} templates (names may carry "+", e.g. {{inh+|...}})
+_TEMPLATE_RE = re.compile(r"\{\{([\w+-]+)\|([^{}]*)\}\}")
+
+# Etymology template names -> canonical kind
+_TEMPLATE_ALIASES: dict[str, str] = {
+    "inh": "inh",
+    "inh+": "inh",
+    "inherited": "inh",
+    "bor": "bor",
+    "bor+": "bor",
+    "borrowed": "bor",
+    "lbor": "bor",
+    "slbor": "bor",
+    "obor": "bor",
+    "der": "der",
+    "der+": "der",
+    "derived": "der",
+    "uder": "der",
+    "cal": "cal",
+    "calque": "cal",
+    "cog": "cog",
+    "cognate": "cog",
+    "m": "m",
+    "mention": "m",
+}
+
+
+def _render_template(match: re.Match[str]) -> str:
+    """Render an etymology template as plain text ("Old English wæter")."""
+    kind = _TEMPLATE_ALIASES.get(match.group(1).lower())
+    params = [p.strip() for p in match.group(2).split("|") if "=" not in p]
+    if kind in ("inh", "bor", "der", "cal") and len(params) >= 3:
+        lang, term = params[1], params[2]
+    elif kind in ("cog", "m") and len(params) >= 2:
+        lang, term = params[0], params[1]
+    else:
+        return ""
+    return f"{language_name(graph_language_code(lang))} {term}".strip()
+
 
 # Common ISO 639-3 language code mappings for Wiktionary language names
-LANGUAGE_CODE_MAP = {
-    "English": "eng",
-    "French": "fra",
-    "German": "deu",
-    "Spanish": "spa",
-    "Italian": "ita",
-    "Portuguese": "por",
-    "Dutch": "nld",
-    "Russian": "rus",
-    "Polish": "pol",
-    "Latin": "lat",
-    "Ancient Greek": "grc",
-    "Greek": "ell",
-    "Old English": "ang",
-    "Middle English": "enm",
-    "Old French": "fro",
-    "Old Norse": "non",
-    "Proto-Germanic": "gem-pro",
-    "Proto-Indo-European": "ine-pro",
-    "Sanskrit": "san",
-    "Arabic": "ara",
-    "Hebrew": "heb",
-    "Japanese": "jpn",
-    "Chinese": "zho",
-    "Korean": "kor",
-}
 
 
 class WiktionaryAdapter(SourceAdapter):
@@ -63,7 +87,8 @@ class WiktionaryAdapter(SourceAdapter):
 
         Args:
             api_endpoint: The Wiktionary API endpoint URL.
-            languages_to_process: List of languages to extract (None for all).
+            languages_to_process: Languages to extract, as names, ISO 639-3 or
+                ISO 639-1 codes (None for all).
             batch_size: Number of entries to fetch per API call.
             rate_limit_ms: Minimum milliseconds between API requests.
             timeout_seconds: HTTP request timeout.
@@ -82,7 +107,11 @@ class WiktionaryAdapter(SourceAdapter):
 
     def connect(self) -> None:
         """Establish connection to Wiktionary API."""
-        self._client = httpx.Client(timeout=self.timeout_seconds)
+        # Wikimedia asks API clients to identify themselves
+        self._client = httpx.Client(
+            timeout=self.timeout_seconds,
+            headers={"User-Agent": "Lexicon/0.1 (https://github.com/kase1111-hash/Lexicon)"},
+        )
         self._connected = True
         logger.info(f"Connected to Wiktionary API at {self.api_endpoint}")
 
@@ -245,6 +274,8 @@ class WiktionaryAdapter(SourceAdapter):
             List of RawLexicalEntry objects.
         """
         entries = []
+        # Names and codes (lower-cased) a section must match to be kept
+        wanted = language_filter_keys(self.languages_to_process or [])
 
         # Split by language sections (==Language==)
         language_pattern = re.compile(r"^==\s*([^=]+?)\s*==$", re.MULTILINE)
@@ -258,12 +289,14 @@ class WiktionaryAdapter(SourceAdapter):
             language_name = language_sections[i].strip()
             section_content = language_sections[i + 1]
 
-            # Filter by languages if specified
-            if self.languages_to_process and language_name not in self.languages_to_process:
-                continue
-
             # Get language code
-            language_code = LANGUAGE_CODE_MAP.get(language_name, language_name[:3].lower())
+            # Unknown names get no code (validation rejects them) rather than an
+            # invented prefix that could collide with another language
+            language_code = LANGUAGE_CODE_MAP.get(language_name, "")
+
+            # Filter by languages if specified (by heading name or code)
+            if wanted and not wanted & {language_name.lower(), language_code}:
+                continue
 
             # Parse the language section
             entry = self._parse_language_section(
@@ -325,9 +358,6 @@ class WiktionaryAdapter(SourceAdapter):
                 }
             )
 
-        if not definitions:
-            definitions = ["(definition not extracted)"]
-
         return RawLexicalEntry(
             source_id=f"wikt-{word}-{language_code}",
             source_name="wiktionary",
@@ -387,62 +417,48 @@ class WiktionaryAdapter(SourceAdapter):
         - {{cog|de|Wasser}} -> cognate with German "Wasser"
         - {{m|ang|wæter}} -> mention of Old English "wæter"
 
-        Returns list of dicts with keys: name, lang, term, raw.
+        A template that names no term ({{bor|en|fr}}, or "-" / "" as the
+        term, e.g. {{der|en|la|-}}) names only a language, so it yields
+        nothing.
+
+        Returns list of dicts with keys: name, lang, term, raw (and
+        target_lang for inh/bor/der/cal).
         """
         templates = []
-        # Match {{name|param1|param2|...}}
-        tmpl_pattern = re.compile(r"\{\{(\w+)\|([^}]*)\}\}")
-
-        for match in tmpl_pattern.finditer(raw_text):
-            name = match.group(1).lower()
-            params = match.group(2).split("|")
-
-            # Only process etymology-relevant templates
-            if name not in (
-                "inh",
-                "inherited",
-                "bor",
-                "borrowed",
-                "der",
-                "derived",
-                "cog",
-                "cognate",
-                "m",
-            ):
+        for match in _TEMPLATE_RE.finditer(raw_text):
+            name = _TEMPLATE_ALIASES.get(match.group(1).lower())
+            if name is None:
                 continue
+            params = [p.strip() for p in match.group(2).split("|") if "=" not in p]
 
             tmpl_dict: dict[str, str] = {"name": name, "raw": match.group(0)}
 
-            if name in ("inh", "inherited", "bor", "borrowed", "der", "derived"):
-                # Format: {{inh|target_lang|source_lang|term}}
-                if len(params) >= 3:
-                    tmpl_dict["target_lang"] = params[0].strip()
-                    tmpl_dict["lang"] = params[1].strip()
-                    tmpl_dict["term"] = params[2].strip()
-                elif len(params) >= 2:
-                    tmpl_dict["lang"] = params[0].strip()
-                    tmpl_dict["term"] = params[1].strip()
-            elif name in ("cog", "cognate"):
-                # Format: {{cog|lang|term}}
-                if len(params) >= 2:
-                    tmpl_dict["lang"] = params[0].strip()
-                    tmpl_dict["term"] = params[1].strip()
-            elif name == "m":
-                # Format: {{m|lang|term}} (mention)
-                if len(params) >= 2:
-                    tmpl_dict["lang"] = params[0].strip()
-                    tmpl_dict["term"] = params[1].strip()
+            if name in ("inh", "bor", "der", "cal"):
+                # Format: {{inh|target_lang|source_lang|term}}; the term is optional
+                if len(params) < 3:
+                    continue
+                tmpl_dict["target_lang"] = params[0]
+                tmpl_dict["lang"], tmpl_dict["term"] = params[1], params[2]
+            else:
+                # Format: {{cog|lang|term}} / {{m|lang|term}} (mention)
+                if len(params) < 2:
+                    continue
+                tmpl_dict["lang"], tmpl_dict["term"] = params[0], params[1]
 
-            if "term" in tmpl_dict:
-                templates.append(tmpl_dict)
+            if tmpl_dict["term"] in ("", "-"):
+                continue
+            templates.append(tmpl_dict)
 
         return templates
 
     def _clean_wikitext(self, text: str) -> str | None:
-        """Clean wikitext markup, removing templates and formatting."""
+        """Clean wikitext markup: render etymology templates, drop the rest."""
         if not text:
             return None
-        text = re.sub(r"\{\{[^}]+\}\}", "", text)  # Remove templates
+        text = _TEMPLATE_RE.sub(
+            _render_template, text
+        )  # "{{inh|en|ang|wæter}}" -> "Old English wæter"
+        text = re.sub(r"\{\{[^}]+\}\}", "", text)  # Remove remaining templates
         text = re.sub(r"\[\[([^|\]]+\|)?([^\]]+)\]\]", r"\2", text)  # Clean links
         text = re.sub(r"'''?", "", text)  # Remove bold/italic
         text = re.sub(r"\s+", " ", text)  # Collapse whitespace
@@ -509,25 +525,62 @@ class WiktionaryAdapter(SourceAdapter):
 
         return pos_list
 
+    # Explicit dating evidence only. Bare numbers (page=, id=, ISBNs) are
+    # never treated as dates.
+    _DEFDATE_RE = re.compile(r"\{\{defdate\|([^}]*)\}\}", re.IGNORECASE)
+    _FIRST_ATTESTED_RE = re.compile(
+        r"(?:first\s+)?attested\s+(?:in|from|since|around|by)?\s*(?:the\s+)?"
+        r"(?:c\.\s*|circa\s+)?"
+        rf"(\d{{1,2}}(?:st|nd|rd|th)\s+c(?:entury|\.)(?:{_BCE})?|\d{{1,4}}(?!\d)(?:{_BCE})?)",
+        re.IGNORECASE,
+    )
+    _QUOTE_YEAR_RE = re.compile(
+        r"\{\{(?:quote-[\w-]+|RQ:[^|}]*)[^}]*?\|\s*year\s*=\s*(?:c\.\s*)?"
+        rf"(\d{{1,4}}(?!\d)(?:{_BCE})?)",
+        re.IGNORECASE,
+    )
+    _QUOTE_LINE_RE = re.compile(
+        rf"^#\*\s*'''(?:c\.\s*)?(\d{{1,4}}(?:{_BCE})?)'''", re.MULTILINE | re.IGNORECASE
+    )
+    _DATE_TOKEN_RE = re.compile(
+        rf"(?<!\d)(?:(\d{{1,2}})(?:st|nd|rd|th)\s+c(?:entury|\.)|(\d{{1,4}})(?!\d))({_BCE})?",
+        re.IGNORECASE,
+    )
+
     def _extract_attestation_date(self, content: str) -> int | None:
-        """Try to extract earliest attestation date from etymology or quotes."""
-        # Look for century patterns like "14th century" or "c. 1400"
-        century_pattern = re.compile(r"(\d{1,2})(?:st|nd|rd|th)\s+century", re.IGNORECASE)
-        match = century_pattern.search(content)
-        if match:
-            century = int(match.group(1))
-            # Return approximate start of century
-            return (century - 1) * 100 + 1
+        """Extract the earliest attestation year from explicit evidence.
 
-        # Look for year patterns like "1400" or "c. 1400"
-        year_pattern = re.compile(r"(?:c\.\s*)?(\d{4})")
-        matches = year_pattern.findall(content)
-        if matches:
-            years = [int(y) for y in matches if 800 <= int(y) <= 2100]
-            if years:
-                return min(years)
+        Sources: {{defdate}} templates, "first attested in ..." phrases,
+        and quotation years (quote-* / RQ: templates with year=, or bold
+        years at the start of #* quotation lines). Years and centuries
+        marked BC/BCE are negative ("8th c. BCE" -> -800, "600 BC" -> -600).
+        Unmarked dates count only from 500 on, so a stray small number (a
+        page, or a BCE year whose era is not stated) is never read as CE.
 
-        return None
+        Returns:
+            Earliest year found, or None when the entry gives no dating evidence.
+        """
+        candidates: list[int] = []
+
+        def add(text: str) -> None:
+            for century, year, bce in self._DATE_TOKEN_RE.findall(text):
+                if bce:
+                    # The Nth century BCE runs from N*100 BCE
+                    candidates.append(-int(century) * 100 if century else -int(year))
+                    continue
+                value = (int(century) - 1) * 100 if century else int(year)
+                if value >= 500:
+                    candidates.append(value)
+
+        for match in self._DEFDATE_RE.finditer(content):
+            add(match.group(1))
+        for pattern in (self._FIRST_ATTESTED_RE, self._QUOTE_YEAR_RE, self._QUOTE_LINE_RE):
+            for match in pattern.finditer(content):
+                add(match.group(1))
+
+        current_year = datetime.now().year
+        plausible = [year for year in candidates if YEAR_MIN <= year <= current_year]
+        return min(plausible) if plausible else None
 
     def fetch_recent_changes(self, hours_back: int = 24) -> Iterator[RawLexicalEntry]:
         """

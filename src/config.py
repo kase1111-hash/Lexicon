@@ -2,7 +2,8 @@
 
 Provides:
 - Type-safe configuration with Pydantic Settings
-- Environment variable loading with .env file support
+- Environment variable loading with .env file support (flat keys such as
+  API_KEY in .env are loaded into the environment, so every section sees them)
 - Configuration validation on startup
 - Sensitive value masking in logs
 """
@@ -13,7 +14,9 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
+from dotenv import load_dotenv
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -23,14 +26,15 @@ logger = logging.getLogger(__name__)
 class DatabaseConfig(BaseSettings):
     """Database connection configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", env_ignore_empty=True)
 
     # Neo4j
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: SecretStr = Field(default=SecretStr(""))
 
-    # PostgreSQL
+    # PostgreSQL (optional; the API uses it only when POSTGRES_URI is set)
+    postgres_uri: SecretStr | None = None
     postgres_host: str = "localhost"
     postgres_port: int = 5432
     postgres_db: str = "linguistic_stratigraphy"
@@ -66,28 +70,34 @@ class DatabaseConfig(BaseSettings):
 class APIConfig(BaseSettings):
     """API server configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", env_ignore_empty=True)
 
-    # Server
-    api_host: str = "0.0.0.0"
+    # Server (used by the `ls-api` command; more than one worker shares
+    # rate-limit counters and export jobs only through Redis)
+    # Local only unless configured; the Docker image passes --host 0.0.0.0 itself
+    api_host: str = "127.0.0.1"
     api_port: int = 8000
-    api_workers: int = 4
+    api_workers: int = Field(default=1, ge=1)
 
     # Authentication
     api_key: SecretStr | None = None
     api_key_header: str = "X-API-Key"
-    jwt_secret: SecretStr | None = None
-    jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 60
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost:8080"
     cors_allow_credentials: bool = False
 
-    # Rate limiting (enabled by default for security)
+    # Rate limiting (enabled by default for security): at most
+    # rate_limit_requests per client per fixed window of
+    # rate_limit_window_seconds (see src.api.middleware.RateLimitMiddleware)
     rate_limit_enabled: bool = True
-    rate_limit_requests: int = 100
-    rate_limit_window_seconds: int = 60
+    rate_limit_requests: int = Field(default=100, ge=1)
+    rate_limit_window_seconds: int = Field(default=60, ge=1)
+
+    # POST /api/v1/graph/query runs caller-written Cypher. Its caps bound the
+    # rows returned, not the memory one huge value takes to receive, so it is
+    # meant for trusted clients; turn it off where others hold the API key.
+    graph_query_enabled: bool = True
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -107,7 +117,7 @@ class APIConfig(BaseSettings):
 class LoggingConfig(BaseSettings):
     """Logging configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", env_ignore_empty=True)
 
     log_level: str = "INFO"
     log_format: Literal["text", "json"] = "text"
@@ -133,7 +143,7 @@ class LoggingConfig(BaseSettings):
 class ErrorTrackingConfig(BaseSettings):
     """Error tracking and monitoring configuration."""
 
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", env_ignore_empty=True)
 
     # Sentry
     sentry_dsn: SecretStr | None = None
@@ -153,18 +163,6 @@ class ErrorTrackingConfig(BaseSettings):
         return v
 
 
-class ExternalServicesConfig(BaseSettings):
-    """External services configuration."""
-
-    model_config = SettingsConfigDict(env_prefix="")
-
-    # Wiktionary
-    wiktionary_rate_limit_ms: int = 100
-
-    # Embedding model
-    embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-
-
 class Settings(BaseSettings):
     """Main application settings combining all configuration sections."""
 
@@ -172,6 +170,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         env_nested_delimiter="__",
+        env_ignore_empty=True,
         extra="ignore",
         case_sensitive=False,
     )
@@ -181,7 +180,6 @@ class Settings(BaseSettings):
     api: APIConfig = Field(default_factory=APIConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     error_tracking: ErrorTrackingConfig = Field(default_factory=ErrorTrackingConfig)
-    external_services: ExternalServicesConfig = Field(default_factory=ExternalServicesConfig)
 
     def validate_required_for_production(self) -> list[str]:
         """Validate that required settings are configured for production."""
@@ -191,12 +189,17 @@ class Settings(BaseSettings):
             # Check required production settings
             if not self.database.neo4j_password.get_secret_value():
                 errors.append("NEO4J_PASSWORD is required in production")
-            if not self.database.postgres_password.get_secret_value():
-                errors.append("POSTGRES_PASSWORD is required in production")
+            # PostgreSQL is optional: check its credentials only when it is used
+            if self.database.postgres_uri is not None and not (
+                urlsplit(self.database.postgres_uri.get_secret_value()).password
+                or self.database.postgres_password.get_secret_value()
+            ):
+                errors.append("POSTGRES_URI has no password (required in production)")
             if self.error_tracking.debug:
                 errors.append("DEBUG must be False in production")
-            if self.api.cors_origins == "*":
-                errors.append("CORS_ORIGINS should not be '*' in production")
+            # CORSMiddleware allows every origin when "*" is anywhere in the list
+            if "*" in self.api.cors_origins_list:
+                errors.append("CORS_ORIGINS should not contain '*' in production")
             if not self.api.api_key:
                 errors.append("API_KEY is required in production")
             if not self.api.rate_limit_enabled:
@@ -237,6 +240,12 @@ def _mask_dict(d: dict[str, Any], depth: int = 0) -> dict[str, Any]:
     return result
 
 
+def _env_file_path() -> Path | None:
+    """The .env file to read (ENV_FILE overrides ./.env), if it exists."""
+    path = Path(os.getenv("ENV_FILE", ".env"))
+    return path if path.is_file() else None
+
+
 @lru_cache
 def get_settings() -> Settings:
     """
@@ -244,16 +253,19 @@ def get_settings() -> Settings:
 
     Settings are cached and only loaded once. Uses LRU cache for thread safety.
 
+    The .env file (or the file named by ENV_FILE) is first loaded into the
+    process environment without overriding variables that are already set.
+    The settings sections read the environment, so the flat keys used in
+    .env.example (API_KEY, CORS_ORIGINS, RATE_LIMIT_*, LOG_LEVEL, ...) take
+    effect, and src.utils.db sees the same values.
+
     Returns:
         Settings instance with all configuration loaded.
     """
-    # Check for custom env file path
-    env_file = os.getenv("ENV_FILE", ".env")
-    env_path = Path(env_file)
-
-    if env_path.exists():
-        return Settings(_env_file=env_path)
-    return Settings()
+    env_path = _env_file_path()
+    if env_path is not None:
+        load_dotenv(env_path, override=False)
+    return Settings(_env_file=env_path)
 
 
 def reload_settings() -> Settings:

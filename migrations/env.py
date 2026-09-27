@@ -1,7 +1,6 @@
 """Alembic environment configuration for database migrations."""
 
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -11,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Import the models for autogenerate support
 from src.models.db_models import Base
+from src.utils.db import DatabaseConfig
 
 # This is the Alembic Config object
 config = context.config
@@ -24,15 +24,17 @@ target_metadata = Base.metadata
 
 
 def get_database_url() -> str:
-    """Get database URL from environment variables."""
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    db = os.getenv("POSTGRES_DB", "linguistic_stratigraphy")
-    user = os.getenv("POSTGRES_USER", "ls_user")
-    password = os.getenv("POSTGRES_PASSWORD", "")
+    """Get the database URL the way the application does, for asyncpg.
 
-    # Use asyncpg driver for async support
-    return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db}"
+    POSTGRES_URI when set, otherwise built from POSTGRES_USER, POSTGRES_PASSWORD,
+    POSTGRES_DB, POSTGRES_HOST and POSTGRES_PORT (environment first, then .env
+    or the file named by ENV_FILE); see src.utils.db.DatabaseConfig.
+    """
+    scheme, separator, rest = DatabaseConfig().postgres_uri.partition("://")
+    if scheme.split("+")[0] in ("postgres", "postgresql"):
+        # Alembic runs on SQLAlchemy's async engine with the asyncpg driver
+        scheme = "postgresql+asyncpg"
+    return f"{scheme}{separator}{rest}"
 
 
 def run_migrations_offline() -> None:

@@ -2,6 +2,11 @@
 
 These models define the relational schema for metadata storage,
 complementing the Neo4j graph database for LSR relationships.
+
+PostgreSQL is optional and reserved for future use: no application code
+reads or writes these tables yet. The alembic migrations (migrations/) are
+the schema; keep these models in step with them (`alembic check` must report
+no new upgrade operations).
 """
 
 from datetime import datetime
@@ -35,11 +40,12 @@ class Language(Base):
     __tablename__ = "languages"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    code = Column(String(10), unique=True, nullable=False, index=True)
+    code = Column(String(10), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     family = Column(String(100))
     branch: Column[list[str]] = Column(ARRAY(String))
-    status = Column(String(50), default="living")  # living, extinct, reconstructed
+    # living, extinct, reconstructed
+    status = Column(String(50), default="living", server_default="living")
     speaker_count = Column(Integer)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -47,7 +53,10 @@ class Language(Base):
     # Relationships
     lsrs = relationship("LSRMetadata", back_populates="language")
 
-    __table_args__ = (Index("idx_language_family", "family"),)
+    __table_args__ = (
+        UniqueConstraint("code"),
+        Index("idx_language_family", "family"),
+    )
 
 
 class LSRMetadata(Base):
@@ -60,7 +69,7 @@ class LSRMetadata(Base):
     __tablename__ = "lsr_metadata"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    neo4j_id = Column(String(100), unique=True, nullable=False, index=True)
+    neo4j_id = Column(String(100), nullable=False, index=True)
 
     # Form data
     form_orthographic = Column(String(500), nullable=False, index=True)
@@ -74,7 +83,7 @@ class LSRMetadata(Base):
     # Temporal data
     date_start = Column(Integer)
     date_end = Column(Integer)
-    date_confidence = Column(Float, default=1.0)
+    date_confidence = Column(Float, default=1.0, server_default="1.0")
     period_label = Column(String(100))
 
     # Semantic data
@@ -84,9 +93,9 @@ class LSRMetadata(Base):
 
     # Metadata
     source_databases: Column[list[str]] = Column(ARRAY(String))
-    confidence_overall = Column(Float, default=1.0)
-    reconstruction_flag = Column(Boolean, default=False)
-    human_validated = Column(Boolean, default=False)
+    confidence_overall = Column(Float, default=1.0, server_default="1.0")
+    reconstruction_flag = Column(Boolean, default=False, server_default="false")
+    human_validated = Column(Boolean, default=False, server_default="false")
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -97,6 +106,7 @@ class LSRMetadata(Base):
     ingestion_records = relationship("IngestionRecord", back_populates="lsr")
 
     __table_args__ = (
+        UniqueConstraint("neo4j_id"),
         Index("idx_lsr_form_language", "form_normalized", "language_code"),
         Index("idx_lsr_date_range", "date_start", "date_end"),
     )
@@ -114,7 +124,7 @@ class Attestation(Base):
     text_excerpt = Column(Text)
     text_source = Column(String(500))
     text_date = Column(Integer)
-    text_date_confidence = Column(Float, default=1.0)
+    text_date_confidence = Column(Float, default=1.0, server_default="1.0")
 
     # Reference
     page_reference = Column(String(100))
@@ -148,7 +158,8 @@ class IngestionRecord(Base):
     processing_notes = Column(Text)
 
     # Status
-    status = Column(String(50), default="processed")  # processed, failed, pending_review
+    # processed, failed, pending_review
+    status = Column(String(50), default="processed", server_default="processed")
 
     # Relationships
     lsr = relationship("LSRMetadata", back_populates="ingestion_records")
@@ -179,7 +190,7 @@ class EntityResolutionLog(Base):
     created_lsr_id = Column(UUID(as_uuid=True), ForeignKey("lsr_metadata.id"))
 
     # Review status
-    reviewed = Column(Boolean, default=False)
+    reviewed = Column(Boolean, default=False, server_default="false")
     reviewer_notes = Column(Text)
     reviewed_at = Column(DateTime)
 
@@ -207,7 +218,7 @@ class AnalysisCache(Base):
     # Validity
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, index=True)
-    hit_count = Column(Integer, default=0)
+    hit_count = Column(Integer, default=0, server_default="0")
 
     __table_args__ = (
         UniqueConstraint("analysis_type", "cache_key", name="uq_analysis_cache"),

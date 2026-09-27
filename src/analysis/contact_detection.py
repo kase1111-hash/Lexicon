@@ -15,6 +15,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.utils.languages import UNDETERMINED_LANGUAGE
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,6 +68,7 @@ CONTACT_TYPE_INDICATORS = {
     "conquest": [
         "military",
         "war",
+        "warfare",
         "weapon",
         "soldier",
         "army",
@@ -206,9 +209,10 @@ class ContactDetector:
         donor_clusters = self._cluster_by_language_and_period(incoming)
         recipient_clusters = self._cluster_by_language_and_period(outgoing)
 
-        # Detect events from incoming borrowings (language was recipient)
+        # Detect events from incoming borrowings (language was recipient).
+        # Thresholds count distinct borrowed words, not sense records.
         for (donor, period), borrowings in donor_clusters.items():
-            if len(borrowings) >= min_borrowings:
+            if len(self._group_by_word(borrowings)) >= min_borrowings:
                 event = self._create_contact_event(
                     donor=donor,
                     recipient=language,
@@ -220,7 +224,7 @@ class ContactDetector:
 
         # Detect events from outgoing borrowings (language was donor)
         for (recipient, period), borrowings in recipient_clusters.items():
-            if len(borrowings) >= min_borrowings:
+            if len(self._group_by_word(borrowings)) >= min_borrowings:
                 event = self._create_contact_event(
                     donor=language,
                     recipient=recipient,
@@ -293,7 +297,7 @@ class ContactDetector:
         clusters = self._cluster_by_time_period(borrowings)
         contact_events = []
         for period, period_borrowings in clusters.items():
-            if len(period_borrowings) >= 3:
+            if len(self._group_by_word(period_borrowings)) >= 3:
                 event = self._create_contact_event(
                     donor=donor,
                     recipient=recipient,
@@ -438,7 +442,8 @@ class ContactDetector:
         for b in borrowings:
             # Get the "other" language (donor or recipient depending on direction)
             other_lang = b.get("donor") or b.get("recipient") or b.get("source_lang")
-            if not other_lang:
+            # A borrowing from an undetermined source is no contact with a language
+            if not other_lang or other_lang == UNDETERMINED_LANGUAGE:
                 continue
 
             date = b.get("date")
@@ -470,6 +475,20 @@ class ContactDetector:
 
         return clusters
 
+    @staticmethod
+    def _group_by_word(borrowings: list[dict]) -> list[list[dict]]:
+        """Group borrowing records by the borrowed (recipient) word.
+
+        Sources such as WOLD give each sense of a word its own record and
+        BORROWED_FROM edge, so records sharing a recipient form are one word.
+        A record without a form counts as a word of its own.
+        """
+        words: dict[Any, list[dict]] = {}
+        for i, b in enumerate(borrowings):
+            key = b.get("form") or b.get("target_form") or b.get("target_id") or i
+            words.setdefault(key, []).append(b)
+        return list(words.values())
+
     def _create_contact_event(
         self,
         donor: str,
@@ -477,32 +496,48 @@ class ContactDetector:
         borrowings: list[dict],
         period: tuple[int, int],
     ) -> ContactEvent:
-        """Create a ContactEvent from a cluster of borrowings."""
-        # Get sample words
-        sample_words = []
-        for b in borrowings[:10]:  # Limit to 10 samples
-            form = b.get("form") or b.get("target_form") or b.get("source_form")
-            if form:
-                sample_words.append(form)
+        """Create a ContactEvent from a cluster of borrowings.
 
-        # Determine semantic domains
-        domains = self._group_by_domain(borrowings)
+        Counts, domains and dates weigh each borrowed word once, however many
+        sense records it has.
+        """
+        words = self._group_by_word(borrowings)
+
+        # Up to 10 distinct sample words
+        sample_words: list[str] = []
+        for senses in words:
+            b = senses[0]
+            form = b.get("form") or b.get("target_form") or b.get("source_form")
+            if form and form not in sample_words:
+                sample_words.append(form)
+                if len(sample_words) == 10:
+                    break
+
+        # Determine semantic domains: borrowed words per domain, a word's
+        # senses counting once
+        word_domains = [list(self._group_by_domain(senses)) for senses in words]
+        domains: dict[str, int] = {}
+        for word_domain in word_domains:
+            for domain in word_domain:
+                domains[domain] = domains.get(domain, 0) + 1
         semantic_domains = list(domains.keys())
 
         # Classify contact type
         contact_type = self._classify_contact_type(domains)
 
         # Calculate confidence
-        confidence = self._calculate_event_confidence(borrowings, domains)
+        confidence = self._calculate_event_confidence(
+            words, domains, words_with_domains=sum(1 for d in word_domains if d)
+        )
 
         # Calculate intensity
-        intensity = min(1.0, len(borrowings) / 50)  # 50+ borrowings = max intensity
+        intensity = min(1.0, len(words) / 50)  # 50+ borrowed words = max intensity
 
         return ContactEvent(
             donor_language=donor,
             recipient_language=recipient,
             date_range=period,
-            vocabulary_count=len(borrowings),
+            vocabulary_count=len(words),
             confidence=round(confidence, 3),
             sample_words=sample_words,
             contact_type=contact_type,
@@ -526,13 +561,13 @@ class ContactDetector:
                     domain_counts[f] += 1
                 continue
 
-            # Otherwise, try to classify from definition
-            definition = b.get("definition", "").lower()
-            if not definition:
+            # Otherwise, try to classify from whole words of the definition
+            words = set(re.findall(r"[a-z]+", (b.get("definition") or "").lower()))
+            if not words:
                 continue
 
             for domain, keywords in SEMANTIC_DOMAINS.items():
-                if any(kw in definition for kw in keywords):
+                if words.intersection(keywords):
                     domain_counts[domain] += 1
                     break
 
@@ -547,9 +582,10 @@ class ContactDetector:
         scores: dict[str, float] = defaultdict(float)
 
         for domain, count in domains.items():
-            domain_lower = domain.lower()
+            # Whole words of the domain name: "Kinship" is not "ship"
+            domain_words = set(re.findall(r"[a-z]+", domain.lower()))
             for contact_type, indicators in CONTACT_TYPE_INDICATORS.items():
-                if any(ind in domain_lower for ind in indicators):
+                if domain_words.intersection(indicators):
                     scores[contact_type] += count
 
         if not scores:
@@ -561,29 +597,45 @@ class ContactDetector:
 
     def _calculate_event_confidence(
         self,
-        borrowings: list[dict],
+        words: list[list[dict]],
         domains: dict[str, int],
+        words_with_domains: int,
     ) -> float:
-        """Calculate confidence score for a contact event."""
+        """Calculate confidence score for a contact event.
+
+        Args:
+            words: The event's borrowing records grouped by borrowed word
+                (see _group_by_word).
+            domains: Borrowed words per semantic domain.
+            words_with_domains: How many of the words have a semantic domain.
+        """
         # Factors:
-        # 1. Number of borrowings (more = higher confidence)
+        # 1. Number of borrowed words (more = higher confidence)
         # 2. Domain coherence (concentrated domains = higher)
         # 3. Date clustering (tight clustering = higher)
 
-        count_score = min(1.0, len(borrowings) / 20)  # 20+ = max score
+        count_score = min(1.0, len(words) / 20)  # 20+ = max score
 
-        # Domain coherence: entropy-based
-        total = sum(domains.values()) if domains else 1
-        entropy = 0.0
-        for count in domains.values():
-            p = count / total
-            if p > 0:
-                entropy -= p * math.log2(p)
-        max_entropy = math.log2(len(SEMANTIC_DOMAINS))
-        domain_score = 1.0 - (entropy / max_entropy) if max_entropy > 0 else 0.5
+        # Domain coherence: entropy-based, credited only for the share of
+        # words that have domain evidence (none -> no credit)
+        domain_score = 0.0
+        if domains:
+            total = sum(domains.values())
+            entropy = 0.0
+            for count in domains.values():
+                p = count / total
+                if p > 0:
+                    entropy -= p * math.log2(p)
+            max_entropy = math.log2(max(len(SEMANTIC_DOMAINS), len(domains)))
+            concentration = min(1.0, max(0.0, 1.0 - entropy / max_entropy))
+            domain_score = concentration * words_with_domains / len(words)
 
-        # Date clustering: standard deviation based
-        dates = [b["date"] for b in borrowings if b.get("date") is not None]
+        # Date clustering: standard deviation of each word's earliest date
+        dates = [
+            min(b["date"] for b in senses if b.get("date") is not None)
+            for senses in words
+            if any(b.get("date") is not None for b in senses)
+        ]
         if len(dates) >= 2:
             mean_date = sum(dates) / len(dates)
             variance = sum((d - mean_date) ** 2 for d in dates) / len(dates)

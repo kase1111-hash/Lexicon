@@ -7,9 +7,13 @@ Loads:
 - The WOLD semantic-field taxonomy into data/semantic_fields.json as
   reference data for ingestion and analysis.
 
-Postgres is reached through DatabaseManager (env-configured). When it is
-unavailable the language rows are written to data/languages_pending.json
-instead so the load can be replayed later.
+PostgreSQL is optional and reserved for future use (no application code reads
+these rows yet). The `languages` table comes from the alembic migrations, so run
+`make db-migrate` first. The connection uses POSTGRES_URI, or POSTGRES_USER /
+POSTGRES_PASSWORD / POSTGRES_DB / POSTGRES_HOST / POSTGRES_PORT (environment,
+then .env), like the application. When PostgreSQL is unavailable the language
+rows are written to data/languages_pending.json instead so the load can be
+replayed later.
 """
 
 import asyncio
@@ -97,12 +101,14 @@ async def insert_languages(languages: list[dict[str, Any]]) -> bool:
             for lang in languages:
                 await conn.execute(
                     """
-                    INSERT INTO languages (id, code, name, family, status)
-                    VALUES (gen_random_uuid(), $1, $2, $3, $4)
+                    INSERT INTO languages
+                        (id, code, name, family, status, created_at, updated_at)
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())
                     ON CONFLICT (code) DO UPDATE
                         SET name = EXCLUDED.name,
                             family = EXCLUDED.family,
-                            status = EXCLUDED.status
+                            status = EXCLUDED.status,
+                            updated_at = NOW()
                     """,
                     lang["iso_code"],
                     lang["name"],
@@ -138,8 +144,8 @@ async def main() -> int:
     pending = write_pending_languages(languages)
     print(
         "PostgreSQL is unavailable; language rows saved to "
-        f"{pending} - start the database (make docker-up, make db-migrate) "
-        "and re-run this script to load them."
+        f"{pending} - start it (docker compose --profile postgres up -d postgres), "
+        "run make db-migrate and re-run this script to load them."
     )
     return 1
 

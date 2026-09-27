@@ -150,6 +150,8 @@ class TestCorpusAdapter:
 
             computer = entries["computer"]
             assert computer.date_attested == 1990
+            # the date's evidence is the earliest document, named
+            assert dragon.raw_data["period_label"].startswith("earliest in corpus: ")
         finally:
             adapter.disconnect()
 
@@ -206,3 +208,19 @@ class TestCLICSIngestionEndToEnd:
         stats = run_clics_ingestion(data_dir=str(cldf_dir), dry_run=True)
         assert stats.lsrs_created > 0
         assert not stats.errors
+
+
+def test_corpus_keeps_same_spelling_in_two_languages_apart(tmp_path):
+    """A Middle English and a Modern English 'night' are different words."""
+    (tmp_path / "chaucer.txt").write_text("the night was long", encoding="utf-8")
+    (tmp_path / "chaucer.json").write_text(
+        '{"date": 1390, "language": "Middle English", "language_code": "enm"}', encoding="utf-8"
+    )
+    (tmp_path / "modern.txt").write_text("the night was long", encoding="utf-8")
+    (tmp_path / "modern.json").write_text('{"date": 1990}', encoding="utf-8")
+
+    adapter = CorpusAdapter(corpus_dir=tmp_path)
+    adapter.connect()
+    nights = {e.language_code: e.date_attested for e in adapter.fetch_all() if e.form == "night"}
+
+    assert nights == {"enm": 1390, "eng": 1990}

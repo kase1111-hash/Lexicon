@@ -1,6 +1,5 @@
 """Integration tests for the API."""
 
-import socket
 from uuid import uuid4
 
 import pytest
@@ -11,18 +10,44 @@ from src.api.main import app
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _one_event_loop():
+    """Serve the whole module from one event loop.
+
+    Outside `with client:` every request runs on a fresh event loop while the
+    global Neo4j driver stays bound to the loop of the first request, so later
+    database calls fail with 503.
+    """
+    import src.utils.db as db_module
+
+    db_module._db_manager = None  # a manager bound to an earlier, finished loop
+    with client:
+        yield
+
+
 def _neo4j_available() -> bool:
-    """Check whether a Neo4j instance is reachable on the default port."""
+    """Check whether the configured Neo4j (NEO4J_URI / NEO4J_PASSWORD or .env) accepts us."""
+    from neo4j import GraphDatabase
+
+    from src.utils.db import DatabaseConfig
+
+    config = DatabaseConfig()
     try:
-        with socket.create_connection(("localhost", 7687), timeout=1):
-            return True
-    except OSError:
+        driver = GraphDatabase.driver(
+            config.neo4j_uri, auth=(config.neo4j_user, config.neo4j_password)
+        )
+        try:
+            driver.verify_connectivity()
+        finally:
+            driver.close()
+        return True
+    except Exception:
         return False
 
 
 requires_db = pytest.mark.skipif(
     not _neo4j_available(),
-    reason="requires live databases (start with `docker compose up`)",
+    reason="requires a reachable Neo4j (start with `docker compose up -d neo4j`)",
 )
 
 
@@ -39,12 +64,16 @@ class TestRootEndpoints:
         assert "docs" in data
 
     def test_health(self):
-        """Test health check endpoint."""
+        """Health reports every backend and is 503 "unhealthy" exactly when Neo4j is down."""
         response = client.get("/health")
-        assert response.status_code == 200
         data = response.json()
-        assert "status" in data
-        assert "databases" in data
+        assert set(data["databases"]) == {"neo4j", "postgres", "elasticsearch", "redis"}
+        neo4j_up = data["databases"]["neo4j"] == "connected"
+        assert response.status_code == (200 if neo4j_up else 503)
+        if neo4j_up:
+            assert data["status"] in ("healthy", "degraded")
+        else:
+            assert data["status"] == "unhealthy"
 
     def test_metrics(self):
         """Test Prometheus metrics endpoint returns text format."""
@@ -64,16 +93,38 @@ class TestRootEndpoints:
 class TestLSREndpoints:
     """Tests for LSR API endpoints."""
 
+    @pytest.fixture
+    def new_lsr(self):
+        """Create LSRs with unique forms through the API; delete them afterwards."""
+        created: list[str] = []
+
+        def make(**fields):
+            body = {
+                "form_orthographic": f"testform{uuid4().hex[:12]}",
+                "language_code": "eng",
+                **fields,
+            }
+            response = client.post("/api/v1/lsr/", json=body)
+            assert response.status_code == 201, response.text
+            created.append(response.json()["data"]["id"])
+            return response.json()["data"]
+
+        yield make
+        for lsr_id in created:
+            client.delete(f"/api/v1/lsr/{lsr_id}")
+
     @requires_db
-    def test_search_empty(self):
-        """Test search with no parameters returns empty results."""
+    def test_search_no_filters(self):
+        """Search with no parameters returns the paginated envelope."""
         response = client.get("/api/v1/lsr/search")
         assert response.status_code == 200
         data = response.json()
-        assert data["results"] == []
-        assert data["total"] == 0
-        assert "limit" in data
-        assert "offset" in data
+        assert isinstance(data["results"], list)
+        assert len(data["results"]) <= 20
+        assert data["total"] >= len(data["results"])
+        assert data["limit"] == 20
+        assert data["offset"] == 0
+        assert set(data["filters"].values()) == {None}
 
     @requires_db
     def test_search_with_form(self):
@@ -90,6 +141,23 @@ class TestLSREndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["filters"]["language"] == "eng"
+        assert all(r["language_code"] == "eng" for r in data["results"])
+
+    @requires_db
+    def test_search_with_iso639_1_language(self):
+        """An ISO 639-1 code is applied as its ISO 639-3 equivalent, not dropped."""
+        response = client.get("/api/v1/lsr/search", params={"language": "en"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["filters"]["language"] == "eng"
+        assert all(r["language_code"] == "eng" for r in data["results"])
+
+    @pytest.mark.parametrize("code", ["e1n2g3", "english", "xx", "e"])
+    def test_search_invalid_language(self, code):
+        """Invalid language codes are rejected instead of silently ignored."""
+        response = client.get("/api/v1/lsr/search", params={"language": code})
+        assert response.status_code == 400
+        assert response.json()["error"] == "INVALID_LANGUAGE_CODE"
 
     @requires_db
     def test_search_with_date_range(self):
@@ -131,6 +199,18 @@ class TestLSREndpoints:
         assert response.status_code == 400  # Custom validation error handler returns 400
 
     @requires_db
+    def test_get_lsr(self, new_lsr):
+        """GET returns the stored record, including its stored timestamps."""
+        created = new_lsr(definition_primary="a test word")
+        response = client.get(f"/api/v1/lsr/{created['id']}")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["id"] == created["id"]
+        assert data["definition_primary"] == "a test word"
+        assert data["created_at"] == created["created_at"]
+        assert data["updated_at"] == created["updated_at"]
+
+    @requires_db
     def test_get_lsr_not_found(self):
         """Test getting non-existent LSR."""
         fake_id = str(uuid4())
@@ -145,66 +225,73 @@ class TestLSREndpoints:
         assert response.status_code == 400  # Custom validation error handler returns 400
 
     @requires_db
-    def test_get_etymology(self):
-        """Test etymology endpoint."""
-        fake_id = str(uuid4())
-        response = client.get(f"/api/v1/lsr/{fake_id}/etymology")
-        assert response.status_code == 200
-        data = response.json()
-        assert "chain" in data
-        assert "depth" in data
+    @pytest.mark.parametrize("endpoint", ["etymology", "descendants", "cognates", "borrowings"])
+    def test_lineage_endpoints_unknown_lsr(self, endpoint):
+        """Lineage endpoints return 404 for an LSR that does not exist."""
+        response = client.get(f"/api/v1/lsr/{uuid4()}/{endpoint}")
+        assert response.status_code == 404
+        assert response.json()["error"] == "LSR_NOT_FOUND"
 
     @requires_db
-    def test_get_descendants(self):
+    def test_get_etymology(self, new_lsr):
+        """An LSR without ancestors is its own proto-form."""
+        lsr_id = new_lsr()["id"]
+        response = client.get(f"/api/v1/lsr/{lsr_id}/etymology")
+        assert response.status_code == 200
+        data = response.json()
+        assert [link["id"] for link in data["chain"]] == [lsr_id]
+        assert data["proto_form"]["id"] == lsr_id
+        assert data["depth"] == 0
+        assert data["truncated"] is False
+
+    @requires_db
+    def test_get_descendants(self, new_lsr):
         """Test descendants endpoint."""
-        fake_id = str(uuid4())
-        response = client.get(f"/api/v1/lsr/{fake_id}/descendants")
+        lsr_id = new_lsr()["id"]
+        response = client.get(f"/api/v1/lsr/{lsr_id}/descendants")
         assert response.status_code == 200
         data = response.json()
-        assert "descendants" in data
+        assert data["descendants"] == []
+        assert data["count"] == 0
+        assert data["depth"] == 3
 
     @requires_db
-    def test_get_descendants_with_depth(self):
+    def test_get_descendants_with_depth(self, new_lsr):
         """Test descendants endpoint with depth parameter."""
-        fake_id = str(uuid4())
-        response = client.get(f"/api/v1/lsr/{fake_id}/descendants", params={"depth": 5})
+        lsr_id = new_lsr()["id"]
+        response = client.get(f"/api/v1/lsr/{lsr_id}/descendants", params={"depth": 5})
         assert response.status_code == 200
         data = response.json()
         assert data["depth"] == 5
 
     @requires_db
-    def test_get_cognates(self):
+    def test_get_cognates(self, new_lsr):
         """Test cognates endpoint."""
-        fake_id = str(uuid4())
-        response = client.get(f"/api/v1/lsr/{fake_id}/cognates")
+        lsr_id = new_lsr()["id"]
+        response = client.get(f"/api/v1/lsr/{lsr_id}/cognates")
         assert response.status_code == 200
         data = response.json()
-        assert "cognates" in data
+        assert data["cognates"] == []
+        assert data["cognate_count"] == 0
+        assert data["by_language"] == {}
 
     @requires_db
-    def test_get_borrowings(self):
+    def test_get_borrowings(self, new_lsr):
         """Test borrowings endpoint."""
-        fake_id = str(uuid4())
-        response = client.get(f"/api/v1/lsr/{fake_id}/borrowings")
+        lsr_id = new_lsr()["id"]
+        response = client.get(f"/api/v1/lsr/{lsr_id}/borrowings")
         assert response.status_code == 200
         data = response.json()
-        assert "borrowed_from" in data
-        assert "borrowed_to" in data
+        assert data["borrowed_from"] == []
+        assert data["borrowed_to"] == []
 
     @requires_db
-    def test_create_lsr(self):
+    def test_create_lsr(self, new_lsr):
         """Test LSR creation endpoint."""
-        response = client.post(
-            "/api/v1/lsr/",
-            json={
-                "form_orthographic": "test",
-                "language_code": "eng",
-                "definition_primary": "a test word",
-            },
-        )
-        assert response.status_code == 201
-        data = response.json()
-        assert "data" in data
+        data = new_lsr(definition_primary="a test word")
+        assert data["language_code"] == "eng"
+        assert data["definition_primary"] == "a test word"
+        assert data["form_normalized"] == data["form_orthographic"].lower()
 
     def test_create_lsr_missing_required(self):
         """Test LSR creation with missing required fields."""
@@ -218,6 +305,7 @@ class TestLSREndpoints:
 class TestAnalysisEndpoints:
     """Tests for analysis API endpoints."""
 
+    @requires_db
     def test_date_text(self):
         """Test text dating endpoint."""
         response = client.post(
@@ -239,6 +327,7 @@ class TestAnalysisEndpoints:
         )
         assert response.status_code == 400
 
+    @requires_db
     def test_detect_anachronisms(self):
         """Test anachronism detection endpoint."""
         response = client.post(
@@ -255,6 +344,7 @@ class TestAnalysisEndpoints:
         assert "verdict" in data
         assert data["analysis"]["claimed_date"] == 1200
 
+    @requires_db
     def test_contact_events(self):
         """Test contact events endpoint."""
         response = client.get(
@@ -264,6 +354,7 @@ class TestAnalysisEndpoints:
         assert response.status_code == 200
         assert isinstance(response.json(), list)
 
+    @requires_db
     def test_contact_events_with_dates(self):
         """Test contact events with date range."""
         response = client.get(
@@ -281,6 +372,7 @@ class TestAnalysisEndpoints:
         assert response.status_code == 400
         assert response.json()["error"] == "INVALID_DATE_RANGE"
 
+    @requires_db
     def test_semantic_drift(self):
         """Test semantic drift endpoint."""
         response = client.get(
@@ -302,6 +394,7 @@ class TestAnalysisEndpoints:
         )
         assert response.status_code == 400
 
+    @requires_db
     def test_compare_concept(self):
         """Test concept comparison endpoint."""
         response = client.get(
@@ -324,7 +417,7 @@ class TestAnalysisEndpoints:
 
 
 class TestGraphEndpoints:
-    """Tests for graph API endpoints."""
+    """Tests for graph API endpoints (fixture-backed cases: test_api_graph.py)."""
 
     @requires_db
     def test_execute_query(self):
@@ -337,19 +430,20 @@ class TestGraphEndpoints:
         data = response.json()
         assert "results" in data
         assert "query" in data
+        assert data["count"] == len(data["results"]) <= 10
+        assert data["truncated"] is False
 
     @requires_db
     def test_get_path(self):
-        """Test path finding endpoint."""
+        """Path finding between LSRs that do not exist is a 404."""
         from_id = str(uuid4())
         to_id = str(uuid4())
         response = client.get(
             "/api/v1/graph/path",
             params={"from_lsr": from_id, "to_lsr": to_id},
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert "paths" in data
+        assert response.status_code == 404
+        assert response.json()["error"] == "LSR_NOT_FOUND"
 
     @requires_db
     def test_get_path_with_max_hops(self):
@@ -360,27 +454,34 @@ class TestGraphEndpoints:
             "/api/v1/graph/path",
             params={"from_lsr": from_id, "to_lsr": to_id, "max_hops": 10},
         )
-        assert response.status_code == 200
+        assert response.status_code == 404
+        response = client.get(
+            "/api/v1/graph/path",
+            params={"from_lsr": from_id, "to_lsr": to_id, "max_hops": 21},
+        )
+        assert response.status_code == 400
 
     @requires_db
     def test_bulk_export(self):
-        """Test bulk export job creation."""
+        """Test a bulk export page."""
         response = client.post(
             "/api/v1/graph/bulk/export",
-            json={"language": "eng", "format": "json"},
+            json={"language": "eng", "format": "json", "limit": 5},
         )
         assert response.status_code == 200
         data = response.json()
-        assert "status" in data
-        assert "count" in data
+        assert data["status"] == "completed"
+        assert data["count"] == len(data["items"]) <= 5
+        assert data["total"] >= data["count"]
+        assert data["truncated"] == (data["total"] > data["count"])
 
     def test_export_status(self):
-        """Test bulk export status check."""
+        """An unknown export job is a 404."""
         response = client.get("/api/v1/graph/bulk/status/test-job-id")
-        assert response.status_code == 200
+        assert response.status_code == 404
         data = response.json()
-        assert "job_id" in data
-        assert "status" in data
+        assert data["error"] == "NOT_FOUND"
+        assert data["details"]["resource_id"] == "test-job-id"
 
 
 class TestErrorHandling:
@@ -425,17 +526,16 @@ class TestRequestHeaders:
 
     def test_request_id_header(self):
         """Test that X-Request-ID header is returned."""
-        response = client.get("/health")
-        # Our middleware adds X-Request-ID to responses
+        response = client.get("/")
         assert response.status_code == 200
-        # Note: The header might not be present in test client
-        # depending on middleware execution
+        assert response.headers.get("X-Request-ID")
 
     def test_custom_request_id(self):
         """Test that custom X-Request-ID is echoed back."""
         custom_id = "test-request-123"
-        response = client.get("/health", headers={"X-Request-ID": custom_id})
+        response = client.get("/", headers={"X-Request-ID": custom_id})
         assert response.status_code == 200
+        assert response.headers["X-Request-ID"] == custom_id
 
 
 class TestAPIKeyAuthentication:
@@ -468,14 +568,26 @@ class TestAPIKeyAuthentication:
 class TestLSREdgeCases:
     """Additional edge case tests for LSR endpoints."""
 
+    @pytest.fixture
+    def cleanup(self):
+        """Collect ids of LSRs created by a test; delete them afterwards."""
+        created: list[str] = []
+        yield created
+        for lsr_id in created:
+            client.delete(f"/api/v1/lsr/{lsr_id}")
+
     @requires_db
     def test_search_with_special_characters(self):
-        """Test search with special characters in form."""
+        """Markup in the form is literal search text, echoed in a JSON response.
+
+        sanitize_string deliberately does not HTML-escape (linguistic notation
+        uses '<' and '>'); escaping belongs to whatever renders the JSON.
+        """
         response = client.get("/api/v1/lsr/search", params={"form": "test<script>"})
         assert response.status_code == 200
-        # Form should be sanitized
+        assert response.headers["content-type"].startswith("application/json")
         data = response.json()
-        assert "<script>" not in data["filters"]["form"]
+        assert data["filters"]["form"] == "test<script>"
 
     def test_search_with_very_long_form(self):
         """Test search with excessively long form parameter."""
@@ -529,12 +641,12 @@ class TestLSREdgeCases:
         assert data["error"] == "LSR_NOT_FOUND"
 
     @requires_db
-    def test_create_lsr_with_dates(self):
+    def test_create_lsr_with_dates(self, cleanup):
         """Test creating LSR with date fields."""
         response = client.post(
             "/api/v1/lsr/",
             json={
-                "form_orthographic": "test_dated",
+                "form_orthographic": f"testdated{uuid4().hex[:12]}",
                 "language_code": "eng",
                 "definition_primary": "a test word with dates",
                 "date_start": 1500,
@@ -543,6 +655,7 @@ class TestLSREdgeCases:
         )
         assert response.status_code == 201
         data = response.json()
+        cleanup.append(data["data"]["id"])
         assert data["data"]["date_start"] == 1500
         assert data["data"]["date_end"] == 1600
 
@@ -561,12 +674,12 @@ class TestLSREdgeCases:
         assert response.status_code in [400, 422]
 
     @requires_db
-    def test_create_lsr_with_phonetic(self):
+    def test_create_lsr_with_phonetic(self, cleanup):
         """Test creating LSR with phonetic transcription."""
         response = client.post(
             "/api/v1/lsr/",
             json={
-                "form_orthographic": "water",
+                "form_orthographic": f"testwater{uuid4().hex[:12]}",
                 "form_phonetic": "ˈwɔːtər",
                 "language_code": "eng",
                 "definition_primary": "H2O",
@@ -574,6 +687,7 @@ class TestLSREdgeCases:
         )
         assert response.status_code == 201
         data = response.json()
+        cleanup.append(data["data"]["id"])
         assert data["data"]["form_phonetic"] == "ˈwɔːtər"
 
 
@@ -589,6 +703,7 @@ class TestAnalysisEdgeCases:
         # Empty text fails the minimum-length requirement
         assert response.status_code == 400
 
+    @requires_db
     def test_date_text_very_long_text(self):
         """Test dating with very long text."""
         long_text = "The quick brown fox jumps over the lazy dog. " * 1000
@@ -598,6 +713,7 @@ class TestAnalysisEdgeCases:
         )
         assert response.status_code == 200
 
+    @requires_db
     def test_detect_anachronisms_ancient_date(self):
         """Test anachronism detection with very old claimed date."""
         response = client.post(
@@ -610,6 +726,7 @@ class TestAnalysisEdgeCases:
         )
         assert response.status_code == 200
 
+    @requires_db
     def test_semantic_drift_with_unicode_form(self):
         """Test semantic drift with Unicode word."""
         response = client.get(
@@ -618,6 +735,7 @@ class TestAnalysisEdgeCases:
         )
         assert response.status_code == 200
 
+    @requires_db
     def test_compare_concept_single_language(self):
         """Test concept comparison with single language."""
         response = client.get(
@@ -632,18 +750,30 @@ class TestAnalysisEdgeCases:
 class TestGraphEdgeCases:
     """Additional edge case tests for graph endpoints."""
 
+    @pytest.fixture
+    def lone_lsr(self):
+        """An LSR created through the API, with no relationships; deleted afterwards."""
+        response = client.post(
+            "/api/v1/lsr/",
+            json={"form_orthographic": f"graphtest{uuid4().hex[:12]}", "language_code": "eng"},
+        )
+        assert response.status_code == 201, response.text
+        lsr_id = response.json()["data"]["id"]
+        yield lsr_id
+        client.delete(f"/api/v1/lsr/{lsr_id}")
+
     def test_execute_query_empty_query(self):
         """Test graph query with empty query string."""
         response = client.post(
             "/api/v1/graph/query",
             json={"query": ""},
         )
-        # Should fail validation
-        assert response.status_code in [400, 422]
+        assert response.status_code == 400
+        assert response.json()["error"] == "VALIDATION_ERROR"
 
     @requires_db
-    def test_execute_query_with_parameters(self):
-        """Test graph query with parameters."""
+    def test_execute_query_with_parameters(self, lone_lsr):
+        """The documented parameterized example returns serialized nodes."""
         response = client.post(
             "/api/v1/graph/query",
             json={
@@ -652,16 +782,27 @@ class TestGraphEdgeCases:
             },
         )
         assert response.status_code == 200
+        rows = response.json()["results"]
+        assert 1 <= len(rows) <= 10
+        assert all(row["n"]["language_code"] == "eng" for row in rows)
+        assert all(isinstance(row["n"]["created_at"], str) for row in rows)
 
-    @requires_db
     def test_get_path_same_source_target(self):
-        """Test path finding with same source and target."""
+        """Path finding needs two different LSRs."""
         lsr_id = str(uuid4())
         response = client.get(
             "/api/v1/graph/path",
             params={"from_lsr": lsr_id, "to_lsr": lsr_id},
         )
-        assert response.status_code == 200
+        assert response.status_code == 400
+
+    def test_get_path_unknown_relationship_type(self):
+        """Unknown relationship types are rejected, not silently dropped."""
+        response = client.get(
+            "/api/v1/graph/path",
+            params={"from_lsr": str(uuid4()), "to_lsr": str(uuid4()), "relationship_types": "X"},
+        )
+        assert response.status_code == 400
 
     @requires_db
     def test_get_path_with_relationship_types(self):
@@ -676,37 +817,42 @@ class TestGraphEdgeCases:
                 "relationship_types": "DESCENDS_FROM,BORROWED_FROM",
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 404
 
     @requires_db
-    def test_etymology_chain(self):
-        """Test etymology chain endpoint."""
-        lsr_id = str(uuid4())
-        response = client.get(f"/api/v1/graph/etymology/{lsr_id}")
+    def test_etymology_chain(self, lone_lsr):
+        """An LSR without ancestors is its own proto-form."""
+        response = client.get(f"/api/v1/graph/etymology/{lone_lsr}")
         assert response.status_code == 200
         data = response.json()
-        assert "chain" in data
-        assert "depth" in data
+        assert [node["id"] for node in data["chain"]] == [lone_lsr]
+        assert data["depth"] == 0
+        assert data["proto_form"]["id"] == lone_lsr
+        assert client.get(f"/api/v1/graph/etymology/{uuid4()}").status_code == 404
 
     @requires_db
-    def test_graph_cognates(self):
+    def test_graph_cognates(self, lone_lsr):
         """Test cognates endpoint on graph router."""
-        lsr_id = str(uuid4())
-        response = client.get(f"/api/v1/graph/cognates/{lsr_id}")
+        response = client.get(f"/api/v1/graph/cognates/{lone_lsr}")
         assert response.status_code == 200
         data = response.json()
-        assert "cognate_count" in data
-        assert "by_language" in data
+        assert data["cognate_count"] == 0
+        assert data["by_language"] == {}
+        assert client.get(f"/api/v1/graph/cognates/{uuid4()}").status_code == 404
 
-    @requires_db
     def test_bulk_export_invalid_format(self):
         """Test bulk export with invalid format."""
         response = client.post(
             "/api/v1/graph/bulk/export",
             json={"language": "eng", "format": "invalid_format"},
         )
-        # Should either handle gracefully or return validation error
-        assert response.status_code in [200, 400, 422]
+        assert response.status_code == 400
+
+    def test_bulk_export_invalid_language(self):
+        """The language is validated like everywhere else."""
+        for language in ("", "e1n2g"):
+            response = client.post("/api/v1/graph/bulk/export", json={"language": language})
+            assert response.status_code == 400
 
 
 class TestContentTypeHandling:

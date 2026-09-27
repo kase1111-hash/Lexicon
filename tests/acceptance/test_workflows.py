@@ -108,7 +108,11 @@ class TestDataIngestionWorkflow:
         ]
 
     def test_fuzzy_match_workflow(self, entity_resolver, existing_lsr_store):
-        """Test fuzzy matching for transcription errors."""
+        """A transcription error is a new record, not a merge candidate.
+
+        Without form_exact credit it cannot reach the review threshold, so
+        only exact (form, language) matches are candidates.
+        """
         entity_resolver.set_lsr_store(existing_lsr_store)
 
         # Simulate transcription error
@@ -123,8 +127,8 @@ class TestDataIngestionWorkflow:
 
         result = entity_resolver.resolve(ocr_entry)
 
-        # Should find fuzzy match
-        assert "form_fuzzy" in result.feature_scores or result.similarity_score > 0
+        assert result.action == ResolutionAction.CREATE_NEW
+        assert result.existing_id is None
 
     def test_multi_source_merge_workflow(self, entity_resolver, existing_lsr_store):
         """Test merging data from multiple sources."""
@@ -194,8 +198,15 @@ class TestAnalysisWorkflow:
         """Test complete text dating workflow."""
         from src.analysis.dating import TextDating
 
-        # Step 1: Initialize analyzer
-        dater = TextDating()
+        # Step 1: Initialize analyzer with dated vocabulary from the graph
+        dater = TextDating(
+            {
+                "knight": {"date_start": 900, "date_end": None, "language_code": "eng"},
+                "castle": {"date_start": 1075, "date_end": None, "language_code": "eng"},
+                "herald": {"date_start": 1350, "date_end": None, "language_code": "eng"},
+                "arrival": {"date_start": 1384, "date_end": None, "language_code": "eng"},
+            }
+        )
 
         # Step 2: Prepare input text
         text = """
@@ -206,16 +217,18 @@ class TestAnalysisWorkflow:
         # Step 3: Analyze text
         result = dater.date_text(text, "eng")
 
-        # Step 4: Verify result structure
+        # Step 4: The newest word bounds the date from below
         assert result.predicted_range is not None
-        assert isinstance(result.predicted_range, tuple)
-        assert 0.0 <= result.confidence <= 1.0
+        assert result.predicted_range[0] == 1384
+        assert 0.0 < result.confidence <= 1.0
 
     def test_anachronism_detection_workflow(self):
         """Test complete anachronism detection workflow."""
         from src.analysis.dating import TextDating
 
-        dater = TextDating()
+        dater = TextDating(
+            {"computer": {"date_start": 1646, "date_end": None, "language_code": "eng"}}
+        )
 
         # Text claiming to be from 1300
         text = "The computer crashed while processing data."
@@ -223,9 +236,8 @@ class TestAnalysisWorkflow:
 
         result = dater.detect_anachronisms(text, claimed_date, "eng")
 
-        # Should provide a verdict
-        assert result.verdict in ["consistent", "suspicious", "anachronistic"]
-        assert isinstance(result.anachronisms, list)
+        assert result.verdict in ("suspicious", "anachronistic")
+        assert result.anachronisms[0]["word"] == "computer"
 
     def test_contact_detection_workflow(self):
         """Test complete contact detection workflow."""

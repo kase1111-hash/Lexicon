@@ -14,6 +14,25 @@ sys.path.insert(0, str(project_root))
 # Set test environment
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("LOG_LEVEL", "WARNING")  # Reduce noise during tests
+# The shared TestClient sends every request from one address; limiter tests
+# build their own middleware instances
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
+
+# Never read the developer's .env, and never touch their databases: DB-backed
+# tests run only against stores named explicitly via TEST_* variables, e.g.
+#   TEST_NEO4J_URI=bolt://localhost:7688 TEST_NEO4J_PASSWORD=... make test
+os.environ["ENV_FILE"] = os.environ.get("TEST_ENV_FILE", "/nonexistent-lexicon-test-env")
+_UNREACHABLE = {
+    "NEO4J_URI": "bolt://127.0.0.1:1",
+    "POSTGRES_URI": "postgresql://lexicon:lexicon@127.0.0.1:1/lexicon",
+    "ELASTICSEARCH_URI": "http://127.0.0.1:1",
+    "REDIS_URI": "redis://127.0.0.1:1",
+}
+for _key, _unreachable in _UNREACHABLE.items():
+    os.environ[_key] = os.environ.get(f"TEST_{_key}", _unreachable)
+for _key in ("NEO4J_USER", "NEO4J_PASSWORD"):
+    if os.environ.get(f"TEST_{_key}"):
+        os.environ[_key] = os.environ[f"TEST_{_key}"]
 
 
 @pytest.fixture

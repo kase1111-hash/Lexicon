@@ -131,10 +131,10 @@ class MetricsCollector:
             }
 
     def _labels_key(self, labels: dict[str, str] | None) -> str:
-        """Create a hashable key from labels."""
+        """Create a hashable key from labels (in Prometheus label syntax)."""
         if not labels:
             return ""
-        return ",".join(f'{k}="{v}"' for k, v in sorted(labels.items()))
+        return ",".join(f'{k}="{_escape_label(str(v))}"' for k, v in sorted(labels.items()))
 
     def increment(
         self, name: str, value: float = 1.0, labels: dict[str, str] | None = None
@@ -197,7 +197,11 @@ class MetricsCollector:
                 "histograms": {
                     name: {
                         key: {
-                            "buckets": hist.counts,
+                            # JSON keys must be strings (and JSON has no Infinity)
+                            "buckets": {
+                                "+Inf" if bucket == float("inf") else str(bucket): count
+                                for bucket, count in hist.counts.items()
+                            },
                             "sum": hist.sum_value,
                             "count": hist.count,
                         }
@@ -252,7 +256,8 @@ class MetricsCollector:
                     lines.append(f"{name}_sum{label_str} {hist.sum_value}")
                     lines.append(f"{name}_count{label_str} {hist.count}")
 
-        return "\n".join(lines)
+        # The text format requires every line, including the last, to end in \n
+        return "\n".join(lines) + "\n"
 
     def reset(self) -> None:
         """Reset all metrics (useful for testing)."""
@@ -261,6 +266,11 @@ class MetricsCollector:
             self._gauges.clear()
             self._histograms.clear()
             self._register_default_metrics()
+
+
+def _escape_label(value: str) -> str:
+    """Escape a label value for the Prometheus text format."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 # Global metrics instance

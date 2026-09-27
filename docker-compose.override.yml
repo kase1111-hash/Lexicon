@@ -1,21 +1,10 @@
-# Development override for docker-compose
-# This file is automatically loaded with docker-compose up
-
-version: '3.8'
+# Development override for docker compose (loaded automatically by
+# `docker compose up`, and not by `-f docker-compose.yml -f
+# docker-compose.production.yml`). Credentials come from .env; do not set them
+# here, or the api service and the databases disagree on passwords.
 
 services:
-  neo4j:
-    environment:
-      - NEO4J_AUTH=neo4j/development_password
-
-  postgres:
-    environment:
-      - POSTGRES_PASSWORD=development_password
-
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
     container_name: ls-api-dev
     environment:
       - ENVIRONMENT=development
@@ -25,14 +14,5 @@ services:
     volumes:
       # Mount source code for hot reloading
       - ./src:/app/src:ro
-      - ./tests:/app/tests:ro
-    ports:
-      - "8000:8000"
-    command: uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
-    depends_on:
-      - neo4j
-      - postgres
-      - redis
-      - elasticsearch
-    networks:
-      - ls-network
+    # Like the image's CMD: X-Forwarded-For is trusted from FORWARDED_ALLOW_IPS
+    command: uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000 --proxy-headers

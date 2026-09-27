@@ -104,9 +104,14 @@ class ColoredFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Format with colors for terminal output."""
-        color = self.COLORS.get(record.levelname, "")
-        record.levelname = f"{color}{record.levelname}{self.RESET}"
-        return super().format(record)
+        color = self.COLORS.get(record.levelname)
+        if color is None:
+            return super().format(record)
+        # Color a copy: the record is shared with the other handlers (e.g. the
+        # JSON log file), which must not see the escape codes
+        colored = logging.makeLogRecord(record.__dict__)
+        colored.levelname = f"{color}{record.levelname}{self.RESET}"
+        return super().format(colored)
 
 
 def setup_logging(
@@ -139,7 +144,8 @@ def setup_logging(
     request_filter = RequestIdFilter()
 
     # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    # stderr, so command output on stdout (e.g. `lexicon ... --json`) stays clean
+    console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(level)
     console_handler.addFilter(request_filter)
 
@@ -149,7 +155,7 @@ def setup_logging(
         # Development format with colors
         fmt = "%(asctime)s | %(levelname)-8s | %(name)s | [%(request_id)s] %(message)s"
         datefmt = "%Y-%m-%d %H:%M:%S"
-        if sys.stdout.isatty():
+        if sys.stderr.isatty():
             console_handler.setFormatter(ColoredFormatter(fmt, datefmt))
         else:
             console_handler.setFormatter(logging.Formatter(fmt, datefmt))
@@ -173,6 +179,9 @@ def setup_logging(
     # Suppress noisy third-party loggers
     for noisy_logger in ["urllib3", "asyncio", "aiohttp", "httpx"]:
         logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+    # The Elasticsearch client logs every request, and a traceback for each
+    # retry; failures that matter are logged by the code that sees them
+    logging.getLogger("elastic_transport").setLevel(logging.ERROR)
 
 
 def get_logger(name: str) -> logging.Logger:

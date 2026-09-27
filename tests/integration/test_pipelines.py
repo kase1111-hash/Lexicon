@@ -71,7 +71,7 @@ class TestEntityResolutionPipeline:
         assert "form_exact" in result.feature_scores
 
     def test_resolve_fuzzy_match(self, resolver):
-        """Test resolving a fuzzy match."""
+        """A near-miss form is not a candidate: it could never reach the review threshold."""
         entry = RawLexicalEntry(
             source_name="corpus",
             source_id="corp-fuzzy-1",
@@ -83,9 +83,8 @@ class TestEntityResolutionPipeline:
 
         result = resolver.resolve(entry)
 
-        # Should find a match due to Levenshtein distance
-        assert result.similarity_score > 0
-        assert "form_fuzzy" in result.feature_scores
+        assert result.action == ResolutionAction.CREATE_NEW
+        assert result.existing_id is None
 
     def test_resolve_no_match_different_language(self, resolver):
         """Test that different language creates new."""

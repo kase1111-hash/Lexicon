@@ -77,7 +77,7 @@ goto end
 
 :type-check
 echo Running type checker...
-mypy src --ignore-missing-imports
+mypy src
 goto end
 
 :security-check
@@ -122,7 +122,7 @@ goto end
 
 :run-api
 echo Starting API server...
-uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn src.api.main:app --reload --host 127.0.0.1 --port 8000
 goto end
 
 :end

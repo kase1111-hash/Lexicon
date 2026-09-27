@@ -8,6 +8,7 @@ Tests cover:
 - Cache manager: get/set/delete operations
 """
 
+import asyncio
 import csv
 import tempfile
 from pathlib import Path
@@ -94,7 +95,8 @@ def wold_csv_dir():
             writer.writerow({"ID": "5-1", "Name": "to eat"})
             writer.writerow({"ID": "23-1", "Name": "computer"})
 
-        # Create forms.csv
+        # Create forms.csv (real WOLD CLDF columns: `Borrowed` category text,
+        # `Borrowed_score` 1.0 = clearly borrowed ... 0.0 = no evidence, `Age`)
         forms_path = Path(tmpdir) / "forms.csv"
         with open(forms_path, "w", newline="") as f:
             writer = csv.DictWriter(
@@ -104,59 +106,76 @@ def wold_csv_dir():
                     "Language_ID",
                     "Parameter_ID",
                     "Form",
+                    "Borrowed",
                     "Borrowed_score",
-                    "source_language",
+                    "Age",
+                ],
+            )
+            writer.writeheader()
+            for row in [
+                ("eng-sky-1", "eng", "1-1", "sky", "1. clearly borrowed", "1.0", "c. 1220"),
+                (
+                    "eng-eat-1",
+                    "eng",
+                    "5-1",
+                    "eat",
+                    "5. no evidence for borrowing",
+                    "0.0",
+                    "Proto-Germanic",
+                ),
+                (
+                    "fra-manger-1",
+                    "fra",
+                    "5-1",
+                    "manger",
+                    "4. very little evidence for borrowing",
+                    "0.25",
+                    "",
+                ),
+                ("swh-kompyuta-1", "swh", "23-1", "kompyuta", "1. clearly borrowed", "1.0", ""),
+                ("eng-empty-1", "eng", "23-1", "", "", "", ""),
+            ]:
+                writer.writerow(dict(zip(writer.fieldnames, row, strict=True)))
+
+        # Create borrowings.csv (donor language/word per borrowed form)
+        borrowings_path = Path(tmpdir) / "borrowings.csv"
+        with open(borrowings_path, "w", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "ID",
+                    "Target_Form_ID",
+                    "Source_word",
+                    "Source_meaning",
+                    "Source_relation",
+                    "Source_certain",
+                    "Source_languoid",
+                    "Source_languoid_glottocode",
                 ],
             )
             writer.writeheader()
             writer.writerow(
                 {
-                    "ID": "eng-sky-1",
-                    "Language_ID": "eng",
-                    "Parameter_ID": "1-1",
-                    "Form": "sky",
-                    "Borrowed_score": "1.0",
-                    "source_language": "Old Norse",
+                    "ID": "1",
+                    "Target_Form_ID": "eng-sky-1",
+                    "Source_word": "ský",
+                    "Source_meaning": "cloud",
+                    "Source_relation": "immediate",
+                    "Source_certain": "yes",
+                    "Source_languoid": "Old Norse",
+                    "Source_languoid_glottocode": "oldn1244",
                 }
             )
             writer.writerow(
                 {
-                    "ID": "eng-eat-1",
-                    "Language_ID": "eng",
-                    "Parameter_ID": "5-1",
-                    "Form": "eat",
-                    "Borrowed_score": "5.0",
-                    "source_language": "",
-                }
-            )
-            writer.writerow(
-                {
-                    "ID": "fra-manger-1",
-                    "Language_ID": "fra",
-                    "Parameter_ID": "5-1",
-                    "Form": "manger",
-                    "Borrowed_score": "4.5",
-                    "source_language": "",
-                }
-            )
-            writer.writerow(
-                {
-                    "ID": "swh-kompyuta-1",
-                    "Language_ID": "swh",
-                    "Parameter_ID": "23-1",
-                    "Form": "kompyuta",
-                    "Borrowed_score": "1.0",
-                    "source_language": "English",
-                }
-            )
-            writer.writerow(
-                {
-                    "ID": "eng-empty-1",
-                    "Language_ID": "eng",
-                    "Parameter_ID": "23-1",
-                    "Form": "",
-                    "Borrowed_score": "",
-                    "source_language": "",
+                    "ID": "2",
+                    "Target_Form_ID": "swh-kompyuta-1",
+                    "Source_word": "computer",
+                    "Source_meaning": "computer",
+                    "Source_relation": "immediate",
+                    "Source_certain": "yes",
+                    "Source_languoid": "English",
+                    "Source_languoid_glottocode": "stan1293",
                 }
             )
 
@@ -244,7 +263,7 @@ class TestWOLDAdapter:
         adapter.disconnect()
 
     def test_convert_form_not_borrowed(self, wold_csv_dir):
-        """Inherited forms (score 5) have no etymology or related_forms."""
+        """Inherited forms (category 5) have no etymology or related_forms."""
         adapter = CLLDAdapter(data_dir=wold_csv_dir)
         adapter.connect()
 
@@ -257,7 +276,7 @@ class TestWOLDAdapter:
         adapter.disconnect()
 
     def test_fetch_borrowings_only(self, wold_csv_dir):
-        """fetch_borrowings filters to score <= 3."""
+        """fetch_borrowings keeps categories 1-3 (clearly/probably/perhaps borrowed)."""
         adapter = CLLDAdapter(data_dir=wold_csv_dir)
         adapter.connect()
 
@@ -315,7 +334,8 @@ class TestWOLDAdapter:
 
         stats = adapter.get_borrowing_stats()
         assert stats["clearly_borrowed"] == 2  # sky, kompyuta
-        assert stats["no_evidence"] == 2  # eat, manger
+        assert stats["little_evidence"] == 1  # manger
+        assert stats["no_evidence"] == 1  # eat
         assert stats["unscored"] == 1  # empty form row
 
         adapter.disconnect()
@@ -428,6 +448,23 @@ class TestLSRRepositoryBatch:
         repo = LSRRepository(db)
         assert repo._has_elasticsearch() is True
 
+    def test_search_fallback_is_marked_degraded(self):
+        """A form search that falls back to Neo4j says so, so it is not cached."""
+        repo = LSRRepository(MagicMock())
+
+        async def failing_es(**kwargs):
+            raise RuntimeError("index unassigned")
+
+        async def neo4j(**kwargs):
+            return [], 0
+
+        repo._has_elasticsearch = lambda: True  # type: ignore[method-assign]
+        repo._search_elasticsearch = failing_es  # type: ignore[method-assign]
+        repo._search_neo4j = neo4j  # type: ignore[method-assign]
+        assert repo.search_degraded is False
+        assert asyncio.run(repo.search(form="sky")) == ([], 0)
+        assert repo.search_degraded is True
+
 
 # =============================================================================
 # Elasticsearch Integration Tests
@@ -534,7 +571,7 @@ class TestWOLDIngestionPipeline:
             validate=False,
         )
 
-        # Only "sky" and "kompyuta" are borrowings (score <= 3)
+        # Only "sky" and "kompyuta" are borrowings (categories 1-3)
         assert stats.entries_fetched == 2
         assert stats.lsrs_created == 2
 
@@ -592,7 +629,7 @@ class TestWiktionaryIngestionPipeline:
             definitions=["clear liquid"],
         )
 
-        _process_entry(entry, resolver, lsr_store, stats, False, validator)
+        _process_entry(entry, resolver, lsr_store, stats, validator)
         assert stats.lsrs_created == 1
         assert stats.lsrs_rejected == 0
 
@@ -617,7 +654,7 @@ class TestWiktionaryIngestionPipeline:
             definitions=["nothing"],
         )
 
-        _process_entry(entry, resolver, lsr_store, stats, False, validator)
+        _process_entry(entry, resolver, lsr_store, stats, validator)
         assert stats.lsrs_rejected == 1
         assert stats.lsrs_created == 0
 
@@ -628,28 +665,24 @@ class TestWiktionaryIngestionPipeline:
 
         lsr_store: dict[UUID, LSR] = {}
 
-        # Create two similar LSRs (LSR model has no etymology_text field,
-        # but RelationshipExtractor uses getattr with fallback)
+        # An English LSR whose etymology names an Old English ancestor that is
+        # also in the store, plus a look-alike German word
         lsr1 = LSR(
             form_orthographic="water",
             language_code="eng",
             language_name="English",
-            form_normalized="water",
+            etymology_text="From Middle English water, from Old English wæter",
         )
-        lsr2 = LSR(
-            form_orthographic="Wasser",
-            language_code="deu",
-            language_name="German",
-            form_normalized="wasser",
-        )
-        lsr_store[lsr1.id] = lsr1
-        lsr_store[lsr2.id] = lsr2
+        ancestor = LSR(form_orthographic="wæter", language_code="ang", language_name="Old English")
+        lookalike = LSR(form_orthographic="Wasser", language_code="deu", language_name="German")
+        for lsr in (lsr1, ancestor, lookalike):
+            lsr_store[lsr.id] = lsr
 
         extractor = RelationshipExtractor()
         count = _extract_relationships(lsr_store, extractor)
-        # Should find cognate relationship via form similarity (water ~ wasser)
-        assert isinstance(count, int)
-        assert count >= 0
+
+        # One DESCENDS_FROM edge water -> wæter; no form-similarity "cognate"
+        assert count == 1
 
     def test_ingestion_stats_summary(self):
         """IngestionStats.summary() produces formatted output."""

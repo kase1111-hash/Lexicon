@@ -26,6 +26,8 @@ from typing import Any
 
 import httpx
 
+from src.utils.languages import language_filter_keys
+
 from .base import RawLexicalEntry, SourceAdapter
 
 logger = logging.getLogger(__name__)
@@ -64,7 +66,8 @@ class CLICSAdapter(SourceAdapter):
             data_dir: Directory containing CLDF CSV files; downloaded from
                 base_url when missing.
             base_url: Base URL of a CLDF dataset's raw files.
-            languages_filter: Optional list of language names to include.
+            languages_filter: Optional list of languages to include, as names,
+                ISO 639-3 or ISO 639-1 codes, or Glottolog codes.
             min_colexifications: Minimum number of distinct concepts a form
                 must express to be emitted (1 = every form, 2 = only true
                 colexifications).
@@ -170,7 +173,8 @@ class CLICSAdapter(SourceAdapter):
                 filepath.write_bytes(response.content)
                 logger.info(f"Downloaded {filepath.name} ({len(response.content)} bytes)")
                 return
-            except (httpx.ConnectError, httpx.ReadTimeout, httpx.HTTPStatusError) as e:
+            except httpx.HTTPError as e:
+                # Any transport failure (proxy, timeout, protocol) or HTTP error status
                 last_error = e
                 wait = (attempt + 1) * 2
                 logger.warning(
@@ -190,6 +194,9 @@ class CLICSAdapter(SourceAdapter):
         if not forms_path.exists():
             raise ConnectionError(f"CLDF forms file missing: {forms_path}")
 
+        # Filter values match a language's name, ISO code or glottocode
+        wanted = language_filter_keys(self.languages_filter or [])
+
         # Group parameter IDs by (language, normalized form)
         groups: dict[tuple[str, str], dict[str, Any]] = {}
         with open(forms_path, encoding="utf-8") as f:
@@ -201,8 +208,11 @@ class CLICSAdapter(SourceAdapter):
                     continue
 
                 lang_info = self._languages.get(language_id, {})
-                lang_name = lang_info.get("Name", language_id)
-                if self.languages_filter and lang_name not in self.languages_filter:
+                if wanted and not wanted & {
+                    lang_info.get("Name", language_id).lower(),
+                    lang_info.get("ISO639P3code", "").lower(),
+                    lang_info.get("Glottocode", "").lower(),
+                }:
                     continue
 
                 key = (language_id, unicodedata.normalize("NFC", form).lower())
@@ -231,12 +241,9 @@ class CLICSAdapter(SourceAdapter):
 
     def _build_entry(self, language_id: str, group: dict[str, Any]) -> RawLexicalEntry | None:
         """Build a RawLexicalEntry for one (language, form) group."""
-        if len(group["parameter_ids"]) < self.min_colexifications:
-            return None
-
         lang_info = self._languages.get(language_id, {})
         lang_name = lang_info.get("Name", language_id)
-        lang_code = lang_info.get("ISO639P3code", "")
+        lang_code = lang_info.get("ISO639P3code", "") or lang_info.get("Glottocode", "")
 
         concepts = []
         for parameter_id in group["parameter_ids"]:
@@ -244,6 +251,10 @@ class CLICSAdapter(SourceAdapter):
             name = param.get("Concepticon_Gloss") or param.get("Name") or parameter_id
             if name not in concepts:
                 concepts.append(name)
+
+        # Count distinct concepts, not rows (one concept can appear twice)
+        if len(concepts) < self.min_colexifications:
+            return None
 
         return RawLexicalEntry(
             source_id=f"clics-{language_id}-{group['row_ids'][0]}",

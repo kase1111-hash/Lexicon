@@ -38,6 +38,11 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    ignore:
+      # The image must stay on the Python minor version the project targets
+      # and CI tests (3.11); only patch updates of python:3.11-slim are wanted
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     labels:
       - "dependencies"
       - "docker"

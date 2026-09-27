@@ -5,10 +5,12 @@ Revises:
 Create Date: 2026-01-27
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+from typing import Union
+
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
@@ -67,7 +69,9 @@ def upgrade() -> None:
     )
     op.create_index("idx_lsr_date_range", "lsr_metadata", ["date_start", "date_end"])
     op.create_index("idx_lsr_form_language", "lsr_metadata", ["form_normalized", "language_code"])
-    op.create_index(op.f("ix_lsr_metadata_form_orthographic"), "lsr_metadata", ["form_orthographic"])
+    op.create_index(
+        op.f("ix_lsr_metadata_form_orthographic"), "lsr_metadata", ["form_orthographic"]
+    )
     op.create_index(op.f("ix_lsr_metadata_form_normalized"), "lsr_metadata", ["form_normalized"])
     op.create_index(op.f("ix_lsr_metadata_language_code"), "lsr_metadata", ["language_code"])
     op.create_index(op.f("ix_lsr_metadata_neo4j_id"), "lsr_metadata", ["neo4j_id"])

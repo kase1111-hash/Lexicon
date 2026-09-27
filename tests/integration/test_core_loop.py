@@ -669,13 +669,16 @@ class TestIngestionScriptLogic:
             definitions=["a large body of salt water"],
         )
 
-        _process_entry(entry, resolver, store, stats, dry_run=False)
+        _process_entry(entry, resolver, store, stats)
 
         assert stats.lsrs_created == 1
         assert len(store) == 1
 
-    def test_process_entry_dry_run(self):
-        """_process_entry in dry-run mode doesn't persist."""
+    def test_process_entry_returns_lsr_id(self):
+        """_process_entry resolves into the in-memory store and returns the LSR id.
+
+        Dry runs share this path; only the final graph write is skipped.
+        """
         from scripts.ingest import IngestionStats, _process_entry
 
         resolver = EntityResolver(
@@ -695,7 +698,7 @@ class TestIngestionScriptLogic:
             language_code="eng",
         )
 
-        _process_entry(entry, resolver, store, stats, dry_run=True)
+        lsr_id = _process_entry(entry, resolver, store, stats)
 
-        assert stats.lsrs_created == 1  # Stats still count
-        assert len(store) == 0  # But store is empty
+        assert stats.lsrs_created == 1
+        assert lsr_id in store

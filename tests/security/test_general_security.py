@@ -9,6 +9,17 @@ from pathlib import Path
 
 import pytest
 
+# Resolve files relative to this checkout, not a machine-specific path
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_DIR = REPO_ROOT / "src"
+
+
+def _source_files() -> list[Path]:
+    """All Python files under src/ (never empty, so scans cannot pass vacuously)."""
+    files = sorted(SRC_DIR.rglob("*.py"))
+    assert files, f"no Python source files found under {SRC_DIR}"
+    return files
+
 
 class TestNoHardcodedCredentials:
     """Test that there are no hardcoded credentials in the codebase."""
@@ -16,8 +27,7 @@ class TestNoHardcodedCredentials:
     @pytest.fixture
     def source_files(self):
         """Get all Python source files."""
-        src_dir = Path("/home/user/Lexicon/src")
-        return list(src_dir.rglob("*.py"))
+        return _source_files()
 
     def test_no_hardcoded_passwords(self, source_files):
         """Test that no passwords are hardcoded in source files."""
@@ -89,14 +99,16 @@ class TestSecureDefaults:
         # Default is off for development, but can be enabled
         assert isinstance(settings.api.rate_limit_enabled, bool)
 
-    def test_jwt_algorithm_secure(self):
-        """Test that JWT uses secure algorithm by default."""
+    def test_api_key_auth_off_unless_configured(self, monkeypatch):
+        """No API key is built in: authentication is enabled only by API_KEY."""
         from src.config import APIConfig
 
-        config = APIConfig()
+        monkeypatch.delenv("API_KEY", raising=False)
+        assert APIConfig(_env_file=None).api_key is None
 
-        # JWT algorithm should be a secure choice
-        assert config.jwt_algorithm in ["HS256", "HS384", "HS512", "RS256", "RS384", "RS512"]
+        monkeypatch.setenv("API_KEY", "configured-key-123")
+        key = APIConfig(_env_file=None).api_key
+        assert key is not None and key.get_secret_value() == "configured-key-123"
 
 
 class TestExceptionSecurity:
@@ -224,23 +236,21 @@ class TestGitIgnoreSecurity:
 
     def test_gitignore_excludes_env_files(self):
         """Test that .gitignore excludes .env files."""
-        gitignore_path = Path("/home/user/Lexicon/.gitignore")
+        gitignore_path = REPO_ROOT / ".gitignore"
+        assert gitignore_path.is_file()
+        lines = {line.strip() for line in gitignore_path.read_text().splitlines()}
 
-        if gitignore_path.exists():
-            content = gitignore_path.read_text()
-
-            # Should exclude .env files
-            assert ".env" in content or "*.env" in content
+        # Should exclude .env files
+        assert ".env" in lines
 
     def test_gitignore_excludes_secrets(self):
-        """Test that .gitignore excludes common secret file patterns."""
-        gitignore_path = Path("/home/user/Lexicon/.gitignore")
+        """Test that .gitignore excludes local secret files."""
+        gitignore_path = REPO_ROOT / ".gitignore"
+        assert gitignore_path.is_file()
+        lines = {line.strip() for line in gitignore_path.read_text().splitlines()}
 
-        if gitignore_path.exists():
-            content = gitignore_path.read_text()
-
-            # At minimum, .env should be excluded
-            assert ".env" in content
+        assert ".env" in lines
+        assert "*.env.local" in lines or ".env.local" in lines
 
 
 class TestDependencySecurity:
@@ -248,8 +258,6 @@ class TestDependencySecurity:
 
     def test_no_known_vulnerable_patterns(self):
         """Test for patterns that indicate vulnerable practices."""
-        src_dir = Path("/home/user/Lexicon/src")
-
         vulnerable_patterns = [
             (r"pickle\.loads?\(", "Pickle deserialization can be dangerous"),
             (r"eval\s*\(", "eval() can execute arbitrary code"),
@@ -258,7 +266,7 @@ class TestDependencySecurity:
             (r"subprocess\..*shell\s*=\s*True", "Shell=True can be dangerous"),
         ]
 
-        for py_file in src_dir.rglob("*.py"):
+        for py_file in _source_files():
             content = py_file.read_text()
 
             for pattern, message in vulnerable_patterns:

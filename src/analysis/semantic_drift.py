@@ -197,28 +197,24 @@ class SemanticDriftAnalyzer:
 
         # Build trajectory points
         points: list[TrajectoryPoint] = []
-        embeddings: list[list[float]] = []
 
         for entry in entries:
             date_start = entry.get("date_start")
-            date_end = entry.get("date_end")
             if date_start is None:
                 continue
 
-            mid_date = (date_start + (date_end or date_start)) // 2
+            # A sense is dated by its first attestation, so a shift is
+            # reported when the new sense appears
             embedding = entry.get("semantic_vector") or []
 
             point = TrajectoryPoint(
-                date=mid_date,
+                date=date_start,
                 embedding_full=embedding,
                 definition=entry.get("definition_primary"),
                 attestation_count=len(entry.get("attestations", [])),
                 confidence=entry.get("confidence_overall", 1.0),
             )
             points.append(point)
-
-            if embedding:
-                embeddings.append(embedding)
 
         if not points:
             return None
@@ -227,11 +223,15 @@ class SemanticDriftAnalyzer:
         # coordinates are comparable between points
         self._assign_2d_coordinates(points)
 
+        # Senses first attested in the same year are not change over time,
+        # so only senses of different dates are compared
+        steps = self._date_steps(points)
+
         # Detect shift events
-        shift_events = self._detect_shifts_from_points(points)
+        shift_events = self._detect_shifts(steps)
 
         # Calculate total drift
-        total_drift = self._calculate_total_drift(embeddings)
+        total_drift = self._calculate_total_drift(steps)
 
         # Calculate stability score
         stability_score = self._calculate_stability(points, shift_events)
@@ -382,38 +382,59 @@ class SemanticDriftAnalyzer:
         for point, (x, y) in zip(usable, coords, strict=True):
             point.embedding_2d = (round(x, 4), round(y, 4))
 
-    def _detect_shifts_from_points(
+    def _date_steps(
         self,
         points: list[TrajectoryPoint],
-    ) -> list[ShiftEvent]:
+    ) -> list[tuple[TrajectoryPoint, TrajectoryPoint, float]]:
         """
-        Detect semantic shifts from trajectory points.
+        Pair each sense with the sense of the previous date it is closest to.
+
+        Senses first attested in the same year are not change over time, so
+        a sense is only compared with the senses of the latest earlier date,
+        and with the closest of them (the one it most plausibly developed
+        from). Points without an embedding are left out.
 
         Args:
-            points: List of trajectory points over time.
+            points: Trajectory points, in date order.
+
+        Returns:
+            (before, after, cosine distance) for every sense that has an
+            earlier-dated sense to compare with.
+        """
+        steps: list[tuple[TrajectoryPoint, TrajectoryPoint, float]] = []
+        previous: list[TrajectoryPoint] = []
+        current: list[TrajectoryPoint] = []
+        for point in (p for p in points if p.embedding_full):
+            if current and point.date != current[0].date:
+                previous, current = current, []
+            current.append(point)
+            if previous:
+                before, distance = min(
+                    (
+                        (p, self._embedding_distance(p.embedding_full, point.embedding_full))
+                        for p in previous
+                    ),
+                    key=lambda pair: pair[1],
+                )
+                steps.append((before, point, distance))
+        return steps
+
+    def _detect_shifts(
+        self,
+        steps: list[tuple[TrajectoryPoint, TrajectoryPoint, float]],
+    ) -> list[ShiftEvent]:
+        """
+        Detect semantic shifts between senses of different dates.
+
+        Args:
+            steps: Sense pairs from _date_steps.
 
         Returns:
             List of detected shift events.
         """
         shifts: list[ShiftEvent] = []
 
-        if len(points) < 2:
-            return shifts
-
-        for i in range(1, len(points)):
-            prev = points[i - 1]
-            curr = points[i]
-
-            # Calculate semantic distance
-            distance = self._embedding_distance(
-                prev.embedding_full,
-                curr.embedding_full,
-            )
-
-            # Skip if either embedding is missing (distance == -1.0)
-            if distance < 0:
-                continue
-
+        for prev, curr, distance in steps:
             # If significant distance, analyze the shift
             if distance > 0.2:  # Threshold for "significant" change
                 shift_type = self._classify_shift(
@@ -518,27 +539,18 @@ class SemanticDriftAnalyzer:
 
     def _calculate_total_drift(
         self,
-        embeddings: list[list[float]],
+        steps: list[tuple[TrajectoryPoint, TrajectoryPoint, float]],
     ) -> float:
         """
         Calculate total semantic drift (cumulative distance traveled).
 
         Args:
-            embeddings: List of embeddings over time.
+            steps: Sense pairs from _date_steps.
 
         Returns:
             Total drift value.
         """
-        if len(embeddings) < 2:
-            return 0.0
-
-        total = 0.0
-        for i in range(1, len(embeddings)):
-            dist = self._embedding_distance(embeddings[i - 1], embeddings[i])
-            if dist >= 0:  # Skip pairs where either embedding is missing
-                total += dist
-
-        return total
+        return float(sum(distance for _, _, distance in steps))
 
     def _calculate_stability(
         self,
@@ -603,6 +615,97 @@ class SemanticDriftAnalyzer:
 
         # Combined score
         return current_divergence * 0.7 + min(1.0, drift_diff) * 0.3
+
+
+def assess_trajectory(
+    trajectory: SemanticTrajectory | None, form: str, language: str
+) -> tuple[str, str]:
+    """Say whether a trajectory can show drift, and why not when it cannot.
+
+    Drift is change over time, so it needs comparable senses (dated, with a
+    definition vector) first attested in at least two different years;
+    senses that share a date are not a change.
+
+    Returns:
+        (status, explanation): status is "ok" or "insufficient_data".
+    """
+    senses = [p for p in (trajectory.points if trajectory else []) if p.embedding_full]
+    dates = sorted({p.date for p in senses})
+    if len(dates) >= 2:
+        return "ok", f"{len(senses)} dated senses compared across {len(dates)} dates."
+    need = "drift needs senses first attested in at least two different years"
+    if not senses:
+        return (
+            "insufficient_data",
+            f"Found no dated sense with a definition for '{form}' in '{language}'; {need}.",
+        )
+    if len(senses) == 1:
+        return (
+            "insufficient_data",
+            f"Found 1 dated sense with a definition for '{form}' in '{language}' "
+            f"(first attested in {dates[0]}); {need}.",
+        )
+    return (
+        "insufficient_data",
+        f"Found {len(senses)} dated senses with a definition for '{form}' in '{language}', "
+        f"all first attested in {dates[0]}; senses of the same date are not a change "
+        f"over time, and {need}.",
+    )
+
+
+def drift_report(form: str, language: str, senses: list[dict[str, Any]]) -> dict[str, Any]:
+    """Semantic drift of a form, as the REST API and the CLI report it.
+
+    Args:
+        form: The form as requested.
+        language: Graph language code.
+        senses: The form's senses (src.analysis.data_access.load_trajectory).
+
+    Returns:
+        {"form", "language", "status", "explanation", "trajectory",
+        "shift_events", "total_drift", "stability_score"}. Unless the status
+        is "ok", the trajectory and shift events are empty and the scores null.
+    """
+    lsr_data = {f"{form.lower()}:{language}": senses} if senses else {}
+    trajectory = SemanticDriftAnalyzer(lsr_data=lsr_data).get_trajectory(form, language)
+    status, explanation = assess_trajectory(trajectory, form, language)
+    report: dict[str, Any] = {
+        "form": form,
+        "language": language,
+        "status": status,
+        "explanation": explanation,
+        "trajectory": [],
+        "shift_events": [],
+        "total_drift": None,
+        "stability_score": None,
+    }
+    if status != "ok" or trajectory is None:
+        return report
+    report["trajectory"] = [
+        {
+            "date": p.date,
+            "embedding_2d": list(p.embedding_2d),
+            "definition": p.definition,
+            "attestation_count": p.attestation_count,
+            "confidence": p.confidence,
+        }
+        for p in trajectory.points
+    ]
+    report["shift_events"] = [
+        {
+            "date": e.date,
+            "change_type": e.change_type,
+            "confidence": e.confidence,
+            "magnitude": e.magnitude,
+            "before_meaning": e.before_meaning,
+            "after_meaning": e.after_meaning,
+            "evidence": e.evidence,
+        }
+        for e in trajectory.shift_events
+    ]
+    report["total_drift"] = trajectory.total_drift
+    report["stability_score"] = trajectory.stability_score
+    return report
 
 
 # Convenience functions for API use

@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use Lexicon in your research, please cite it as below, and cite the datasets you ingested (e.g. WOLD, IDS)."
+title: "Lexicon: dating texts by their words (computational linguistic stratigraphy)"
+type: software
+authors:
+  - family-names: Branham
+    given-names: Kase
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/kase1111-hash/Lexicon"
+keywords:
+  - historical linguistics
+  - etymology
+  - text dating
+  - anachronism detection
+  - language contact
+  - knowledge graph

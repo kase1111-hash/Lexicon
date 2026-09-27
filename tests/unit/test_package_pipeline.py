@@ -20,7 +20,8 @@ class TestPackageImports:
         import src
 
         assert hasattr(src, "__version__")
-        assert src.__version__ == "0.1.0"
+        version_file = Path(__file__).resolve().parents[2] / "VERSION"
+        assert src.__version__ == version_file.read_text().strip()
 
     def test_config_imports(self):
         """Test configuration module imports."""

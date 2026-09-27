@@ -1,192 +1,285 @@
 #!/usr/bin/env python3
 """Lexicon CLI - command-line interface for the Linguistic Stratigraphy system.
 
+Every command except `validate` and `extract-rels` works against the Neo4j
+graph configured by NEO4J_URI / NEO4J_PASSWORD (environment or .env).
+
 Usage:
-    python -m src.cli ingest --words data/seed_words_eng.txt --language eng
-    python -m src.cli search --form water --language eng
-    python -m src.cli analyze date-text --text "The knight rode forth"
-    python -m src.cli analyze anachronisms --text "The knight used a computer" --date 1300
-    python -m src.cli validate --form water --language eng
-    python -m src.cli stats
+    lexicon ingest --source wold --language English
+    lexicon search --form sky --language eng
+    lexicon analyze anachronisms --text "The knight spoke on the telephone" --date 1300
+    lexicon analyze date-text --text "The knight rode forth under the sky"
+    lexicon analyze contact --language eng
+    lexicon analyze drift --form nice --language eng
+    lexicon stats
+    lexicon reindex
+    lexicon validate --form water --language eng
+    lexicon extract-rels --text "From Old English wæter"
 """
 
 import argparse
+import asyncio
+import json
 import logging
+import os
 import sys
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict
 from pathlib import Path
+from typing import Any, NoReturn, TypeVar
 
-from src.analysis.contact_detection import ContactDetector
-from src.analysis.dating import TextDating
-from src.analysis.semantic_drift import SemanticDriftAnalyzer
+from neo4j.exceptions import DriverError, Neo4jError
+
+from src.exceptions import DatabaseError
 from src.pipelines.relationship_extraction import RelationshipExtractor
 from src.pipelines.validation import Validator
+from src.utils.db import DatabaseManager
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 logger = logging.getLogger("lexicon")
 
+T = TypeVar("T")
 
-def cmd_ingest(args: argparse.Namespace) -> None:
-    """Run the ingestion pipeline."""
-    # Import here to avoid circular deps and heavy imports at startup
-    from src.ingestion import load_word_list, run_ingestion, run_wold_ingestion
 
-    if args.source == "wold":
-        languages = args.language.split(",") if args.language else None
-        stats = run_wold_ingestion(
-            data_dir=args.data_dir,
-            languages_filter=languages,
-            borrowings_only=args.borrowings_only,
-            dry_run=args.dry_run,
-        )
-        print(stats.summary())
-        return
+def _graph_failed(db: DatabaseManager, message: str) -> NoReturn:
+    """Report a Neo4j failure after connecting and exit with status 2."""
+    print(
+        f"Error: {message} (Neo4j at {db.config.neo4j_uri}); no result was produced.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
-    if args.word:
-        words = [args.word]
-    elif args.words:
-        path = Path(args.words)
-        if not path.exists():
-            print(f"Error: Word list file not found: {path}")
-            sys.exit(1)
-        words = load_word_list(str(path))
-        print(f"Loaded {len(words)} words from {path}")
-    else:
-        print("Error: Either --words or --word is required")
+
+def _run_with_graph(fn: Callable[[DatabaseManager], Awaitable[T]], search: bool = False) -> T:
+    """Connect to Neo4j (and optionally Elasticsearch), run fn, and close.
+
+    Exits with status 2 and a clear message when Neo4j is unreachable, or
+    fails, times out or drops the connection while fn runs.
+    """
+
+    async def runner() -> T:
+        db = DatabaseManager()
+        if not await db.connect_neo4j():
+            error = db.get_connection_errors().get("neo4j", "unknown error")
+            print(
+                f"Error: cannot reach Neo4j at {db.config.neo4j_uri}: {error}\n"
+                "Start it with `docker compose up -d neo4j` and check NEO4J_URI / "
+                "NEO4J_PASSWORD in .env.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if search and db.config.elasticsearch_configured:
+            # Unreachable: search falls back to Neo4j substring matching
+            await db.connect_elasticsearch(quiet=True)
+        try:
+            return await fn(db)
+        except DatabaseError as e:
+            _graph_failed(db, e.message)
+        except (DriverError, Neo4jError) as e:
+            _graph_failed(db, f"Neo4j query failed: {e}")
+        finally:
+            await db.close_all()
+
+    return asyncio.run(runner())
+
+
+def _print_json(data: Any) -> None:
+    print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+
+
+def _language(value: str | None) -> str:
+    """Normalize a --language value (ISO 639-3, or common 639-1)."""
+    from src.utils.validation import normalize_language_code
+
+    try:
+        return normalize_language_code(value or "eng")
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    stats = run_ingestion(
-        words=words,
-        language=args.language,
-        dry_run=args.dry_run,
-        rate_limit_ms=args.rate_limit,
-    )
-    print(stats.summary())
+
+def cmd_ingest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Run the ingestion pipeline (same options as `python -m src.ingestion`)."""
+    from src.ingestion import run_cli
+
+    run_cli(args, parser)
 
 
 def cmd_search(args: argparse.Namespace) -> None:
-    """Search the local LSR store (in-memory demo mode)."""
-    print(f"Searching for form='{args.form}', language='{args.language or 'any'}'")
-    print()
-    print("Note: This is a local demo. For full search, use the API server:")
-    print(f"  curl 'http://localhost:8000/api/v1/lsr/search?form={args.form}'")
+    """Search the graph for LSRs by form."""
+    from src.repositories.lsr_repository import LSRRepository
+
+    language = _language(args.language) if args.language else None
+
+    async def search(db: DatabaseManager) -> tuple[list, int]:
+        return await LSRRepository(db).search(form=args.form, language=language, limit=args.limit)
+
+    results, total = _run_with_graph(search, search=True)
+    if args.json:
+        _print_json({"total": total, "results": [lsr.model_dump(mode="json") for lsr in results]})
+        return
+
+    print(f"{total} match(es) for '{args.form}'" + (f" in {language}" if language else ""))
+    for lsr in results:
+        dates = f"{lsr.date_start if lsr.date_start is not None else '?'}-"
+        dates += str(lsr.date_end) if lsr.date_end is not None else "present"
+        gloss = f" '{lsr.definition_primary}'" if lsr.definition_primary else ""
+        print(f"  {lsr.form_orthographic} [{lsr.language_code}] {dates}{gloss}  id={lsr.id}")
 
 
 def cmd_analyze(args: argparse.Namespace) -> None:
-    """Run analysis commands."""
-    if args.analysis_type == "date-text":
-        _analyze_date_text(args)
-    elif args.analysis_type == "anachronisms":
-        _analyze_anachronisms(args)
-    elif args.analysis_type == "contact":
-        _analyze_contact(args)
-    elif args.analysis_type == "drift":
-        _analyze_drift(args)
-    else:
-        print(f"Unknown analysis type: {args.analysis_type}")
-        sys.exit(1)
+    """Run an analysis against the graph."""
+    handlers = {
+        "date-text": _analyze_date_text,
+        "anachronisms": _analyze_anachronisms,
+        "contact": _analyze_contact,
+        "drift": _analyze_drift,
+    }
+    handlers[args.analysis_type](args)
 
 
 def _analyze_date_text(args: argparse.Namespace) -> None:
     """Date a text based on its vocabulary."""
+    from src.analysis.data_access import load_vocabulary_for_text
+    from src.analysis.dating import TextDating
+
     text = _get_text(args)
-    language = args.language or "eng"
+    language = _language(args.language)
 
-    dater = TextDating()
-    result = dater.date_text(text, language)
+    async def analyze(db: DatabaseManager) -> Any:
+        lookup = await load_vocabulary_for_text(db, language, text)
+        return TextDating(lsr_lookup=lookup).date_text(text, language)
 
-    print(f"Language: {language}")
-    print(f"Text length: {len(text)} chars, {len(text.split())} words")
-    print(f"Predicted date range: {result.predicted_range[0]}-{result.predicted_range[1]}")
+    result = _run_with_graph(analyze)
+    if args.json:
+        _print_json(asdict(result))
+        return
+
+    print(f"Status: {result.status}")
+    if result.predicted_range:
+        print(f"Estimated date range: {result.predicted_range[0]}-{result.predicted_range[1]}")
     print(f"Confidence: {result.confidence:.2f}")
-    print(f"Tokens analyzed: {result.analyzed_tokens}")
-    print(f"Tokens matched: {result.matched_tokens}")
-    print(f"Method: {result.method}")
-    if result.diagnostic_vocabulary:
-        words = ", ".join(w["word"] for w in result.diagnostic_vocabulary[:10])
-        print(f"Diagnostic vocabulary: {words}")
+    print(f"Dated words: {result.matched_tokens} of {result.content_tokens} content words")
+    print(result.explanation)
+    if result.unknown_words:
+        print(f"Not in graph: {', '.join(result.unknown_words[:15])}")
 
 
 def _analyze_anachronisms(args: argparse.Namespace) -> None:
     """Detect anachronistic vocabulary."""
-    text = _get_text(args)
-    language = args.language or "eng"
-    claimed_date = args.date
+    from src.analysis.data_access import load_vocabulary_for_text
+    from src.analysis.dating import TextDating
 
-    if claimed_date is None:
-        print("Error: --date is required for anachronism detection")
+    if args.date is None:
+        print("Error: --date is required for anachronism detection", file=sys.stderr)
         sys.exit(1)
+    text = _get_text(args)
+    language = _language(args.language)
 
-    dater = TextDating()
-    result = dater.detect_anachronisms(text, claimed_date, language)
+    async def analyze(db: DatabaseManager) -> Any:
+        lookup = await load_vocabulary_for_text(db, language, text)
+        return TextDating(lsr_lookup=lookup).detect_anachronisms(text, args.date, language)
 
-    print(f"Language: {language}")
-    print(f"Claimed date: {claimed_date}")
-    print(f"Verdict: {result.verdict}")
-    print(f"Confidence: {result.confidence:.2f}")
-    print(f"Explanation: {result.explanation}")
-    if result.anachronisms:
-        print(f"Anachronisms found: {len(result.anachronisms)}")
-        for a in result.anachronisms[:5]:
-            print(f"  - {a}")
+    result = _run_with_graph(analyze)
+    if args.json:
+        _print_json(asdict(result))
+        return
+
+    print(f"Verdict: {result.verdict} (confidence {result.confidence:.2f})")
+    print(f"Dated words: {result.dated_tokens} of {result.content_tokens} content words")
+    print(result.explanation)
+    for a in result.anachronisms[:10]:
+        if a["type"] == "coined_after":
+            year = a["earliest_attestation"]
+            label = a.get("date_label") or ""
+            source = f"{label}; " if label and label != str(year) else ""
+            print(
+                f"  - {a['word']}: first attested {year} "
+                f"({source}{a['gap_years']} years after {args.date}, {a['severity']})"
+            )
+        else:
+            print(f"  - {a['word']}: last attested {a['last_attestation']} (possible archaism)")
+    if result.unknown_words:
+        print(f"Not in graph: {', '.join(result.unknown_words[:15])}")
 
 
 def _analyze_contact(args: argparse.Namespace) -> None:
-    """Detect language contact events."""
-    language = args.language or "eng"
+    """Detect language contact events from borrowing edges."""
+    from src.analysis.contact_detection import ContactDetector
+    from src.analysis.data_access import load_borrowings
 
-    detector = ContactDetector()
-    events = detector.detect_contacts(language)
+    language = _language(args.language)
 
-    print(f"Language: {language}")
-    print(f"Contact events detected: {len(events)}")
-    for event in events[:5]:
+    async def load(db: DatabaseManager) -> list[dict[str, Any]]:
+        return await load_borrowings(db, language)
+
+    borrowings = _run_with_graph(load)
+    names = {b["source_lang"]: b["source_lang_name"] for b in borrowings}
+    events = ContactDetector(borrowing_data=borrowings).detect_contacts(language)
+    if args.json:
+        _print_json([asdict(e) for e in events])
+        return
+
+    dated = sum(1 for b in borrowings if b.get("date") is not None)
+    print(f"{len(borrowings)} borrowing edges involving '{language}', {dated} of them dated")
+    if not borrowings:
+        print("No BORROWED_FROM edges in the graph; ingest WOLD data first.")
+    elif not dated:
+        print("Contact events are dated by the borrowed words' first attestations; none are dated.")
+    print(f"Contact events: {len(events)}")
+    for e in events[:15]:
+        donor = names.get(e.donor_language) or e.donor_language
         print(
-            f"  {event.donor_language} -> {event.recipient_language}: "
-            f"{event.vocabulary_count} words, confidence={event.confidence:.2f}"
+            f"  {donor} -> {e.recipient_language} {e.date_range[0]}-{e.date_range[1]}: "
+            f"{e.vocabulary_count} words (e.g. {', '.join(e.sample_words[:5])}), "
+            f"confidence {e.confidence:.2f}"
         )
 
 
 def _analyze_drift(args: argparse.Namespace) -> None:
     """Analyze semantic drift for a word."""
-    form = args.form
-    language = args.language or "eng"
+    from src.analysis.data_access import load_trajectory
+    from src.analysis.semantic_drift import drift_report
 
-    if not form:
-        print("Error: --form is required for drift analysis")
+    if not args.form:
+        print("Error: --form is required for drift analysis", file=sys.stderr)
         sys.exit(1)
+    language = _language(args.language)
 
-    analyzer = SemanticDriftAnalyzer()
-    result = analyzer.get_trajectory(form, language)
+    async def load(db: DatabaseManager) -> list[dict[str, Any]]:
+        return await load_trajectory(db, args.form, language)
 
-    print(f"Form: {form}")
-    print(f"Language: {language}")
-    if result is None:
-        print("No trajectory data found (load data via ingestion first)")
-    else:
-        print(f"Trajectory points: {len(result.points)}")
-        print(f"Total drift: {result.total_drift:.2f}")
-        print(f"Stability score: {result.stability_score:.2f}")
-        for point in result.points[:5]:
-            print(f"  {point.date}: {point.definition}")
+    report = drift_report(args.form, language, _run_with_graph(load))
+    if args.json:
+        _print_json(report)
+        return
+
+    if report["status"] != "ok":
+        print(f"{report['status']}: {report['explanation']}")
+        return
+
+    print(f"Senses compared: {len(report['trajectory'])}")
+    print(f"Total drift: {report['total_drift']:.2f}  Stability: {report['stability_score']:.2f}")
+    for point in report["trajectory"]:
+        print(f"  {point['date']}: {point['definition']}")
+    for event in report["shift_events"]:
+        print(
+            f"  shift at {event['date']}: {event['before_meaning']!r} -> "
+            f"{event['after_meaning']!r}"
+        )
 
 
 def _get_text(args: argparse.Namespace) -> str:
     """Get text from --text or --file argument."""
     if args.text:
         return str(args.text)
-    elif hasattr(args, "file") and args.file:
+    if getattr(args, "file", None):
         path = Path(args.file)
         if not path.exists():
-            print(f"Error: File not found: {path}")
+            print(f"Error: File not found: {path}", file=sys.stderr)
             sys.exit(1)
         return path.read_text()
-    else:
-        print("Error: Either --text or --file is required")
-        sys.exit(1)
+    print("Error: Either --text or --file is required", file=sys.stderr)
+    sys.exit(1)
 
 
 def cmd_validate(args: argparse.Namespace) -> None:
@@ -217,13 +310,8 @@ def cmd_validate(args: argparse.Namespace) -> None:
 
 def cmd_extract_relationships(args: argparse.Namespace) -> None:
     """Extract relationships from etymology text."""
-    text = args.text
-    if not text:
-        print("Error: --text is required")
-        sys.exit(1)
-
     extractor = RelationshipExtractor()
-    raw_rels = extractor.extract_from_etymology_text(text)
+    raw_rels = extractor.extract_from_etymology_text(args.text)
 
     print(f"Extracted {len(raw_rels)} relationships:")
     for rel in raw_rels:
@@ -237,66 +325,98 @@ def cmd_extract_relationships(args: argparse.Namespace) -> None:
 
 
 def cmd_stats(args: argparse.Namespace) -> None:
-    """Show system statistics."""
-    print("Lexicon System Statistics")
-    print("=" * 40)
-    print()
-    print("Note: Full stats require a running database.")
-    print("Use the API for live statistics:")
-    print("  curl http://localhost:8000/health")
-    print()
-    print("Available components:")
-    print("  - Wiktionary adapter: ready")
-    print("  - Entity resolution: ready")
-    print("  - Relationship extraction: ready")
-    print("  - Validation pipeline: ready")
-    print("  - Text dating: ready")
-    print("  - Contact detection: ready")
-    print("  - Semantic drift analysis: ready")
+    """Show what is in the graph."""
+    from src.repositories.lsr_repository import LSRRepository
+
+    async def stats(db: DatabaseManager) -> dict[str, Any]:
+        return await LSRRepository(db).get_statistics()
+
+    # A failed query raises DatabaseError (exit 2 in _run_with_graph); an
+    # "error" key is the older way of reporting it, never printed as a result
+    data = _run_with_graph(stats)
+    if "error" in data:
+        print(f"Error: {data['error']}", file=sys.stderr)
+        sys.exit(2)
+    if args.json:
+        _print_json(data)
+        return
+
+    print(f"LSRs: {data.get('total_lsrs', 0)}")
+    print(f"Relationships: {data.get('total_relationships', 0)}")
+    for key, value in data.items():
+        if key.startswith("rel_") and value:
+            print(f"  {key[4:].upper()}: {value}")
+    by_language = data.get("by_language", {})
+    if by_language:
+        top = ", ".join(f"{lang}={n}" for lang, n in list(by_language.items())[:10])
+        print(f"Top languages: {top}")
+    if not data.get("total_lsrs"):
+        print("The graph is empty. Load data with: lexicon ingest --source wold --language English")
+
+
+def cmd_reindex(args: argparse.Namespace) -> None:
+    """Rebuild the Elasticsearch search index from the graph.
+
+    Afterwards the API's cached searches are cleared (as after the API's own
+    reindex), since they were answered from the index as it was before.
+    """
+    from src.pipelines.graph_writer import _clear_api_cache
+    from src.repositories.lsr_repository import LSRRepository
+
+    async def reindex(db: DatabaseManager) -> Any:
+        result = await LSRRepository(db).reindex_all_to_elasticsearch()
+        await _clear_api_cache(db, owns_db=True)
+        return result
+
+    result = _run_with_graph(reindex, search=True)
+    if result.errors:
+        print(f"Error: {'; '.join(result.errors[:3])}", file=sys.stderr)
+        sys.exit(1)
+    print(f"Indexed {result.succeeded} LSRs ({result.failed} failed)")
 
 
 def main() -> None:
+    """Entry point of the `lexicon` command."""
+    try:
+        _main()
+    except BrokenPipeError:
+        # The output went to a reader that stopped early (`lexicon ... | head`):
+        # silence the flush at exit instead of printing a traceback
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(1)
+
+
+def _main() -> None:
+    from src.ingestion import add_arguments as add_ingest_arguments
+
     parser = argparse.ArgumentParser(
         prog="lexicon",
-        description="Lexicon - Computational Linguistic Stratigraphy CLI",
+        description="Lexicon - date a text by its words: ingest dated lexical data into a "
+        "graph, then date texts, flag anachronisms and find language-contact events.",
     )
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    # ingest
-    p_ingest = subparsers.add_parser("ingest", help="Ingest from Wiktionary or WOLD")
-    p_ingest.add_argument(
-        "--source",
-        type=str,
-        choices=["wiktionary", "wold"],
-        default="wiktionary",
-        help="Data source",
-    )
-    p_ingest.add_argument("--words", type=str, help="Path to word list file")
-    p_ingest.add_argument("--word", type=str, help="Single word to ingest")
-    p_ingest.add_argument("--language", type=str, help="Language filter (e.g. 'English')")
-    p_ingest.add_argument("--data-dir", type=str, help="WOLD data directory")
-    p_ingest.add_argument("--borrowings-only", action="store_true", help="WOLD: borrowings only")
-    p_ingest.add_argument("--dry-run", action="store_true", help="Don't persist")
-    p_ingest.add_argument("--rate-limit", type=int, default=100, help="Rate limit (ms)")
+    p_ingest = subparsers.add_parser("ingest", help="Load a data source into the graph")
+    add_ingest_arguments(p_ingest)
 
-    # search
-    p_search = subparsers.add_parser("search", help="Search for a word")
+    p_search = subparsers.add_parser("search", help="Search the graph for a word")
     p_search.add_argument("--form", type=str, required=True, help="Word form")
-    p_search.add_argument("--language", type=str, help="Language code")
+    p_search.add_argument("--language", type=str, help="Language code (e.g. eng)")
+    p_search.add_argument("--limit", type=int, default=20, help="Maximum results")
+    p_search.add_argument("--json", action="store_true", help="Print JSON")
 
-    # analyze
-    p_analyze = subparsers.add_parser("analyze", help="Run analysis")
+    p_analyze = subparsers.add_parser("analyze", help="Run an analysis against the graph")
     p_analyze.add_argument(
         "analysis_type", choices=["date-text", "anachronisms", "contact", "drift"]
     )
     p_analyze.add_argument("--text", type=str, help="Text to analyze")
     p_analyze.add_argument("--file", type=str, help="File containing text")
-    p_analyze.add_argument("--language", type=str, help="Language code")
+    p_analyze.add_argument("--language", type=str, help="Language code (default: eng)")
     p_analyze.add_argument("--date", type=int, help="Claimed date (for anachronisms)")
     p_analyze.add_argument("--form", type=str, help="Word form (for drift)")
+    p_analyze.add_argument("--json", action="store_true", help="Print JSON")
 
-    # validate
     p_validate = subparsers.add_parser("validate", help="Validate an LSR record")
     p_validate.add_argument("--form", type=str, help="Word form")
     p_validate.add_argument("--language", type=str, help="Language code")
@@ -305,20 +425,22 @@ def main() -> None:
     p_validate.add_argument("--definition", type=str, help="Definition")
     p_validate.add_argument("--strict", action="store_true", help="Treat warnings as failures")
 
-    # extract-relationships
     p_extract = subparsers.add_parser("extract-rels", help="Extract relationships from etymology")
     p_extract.add_argument("--text", type=str, required=True, help="Etymology text")
 
-    # stats
-    subparsers.add_parser("stats", help="Show system statistics")
+    p_stats = subparsers.add_parser("stats", help="Show what is in the graph")
+    p_stats.add_argument("--json", action="store_true", help="Print JSON")
+
+    subparsers.add_parser("reindex", help="Rebuild the Elasticsearch index from the graph")
 
     args = parser.parse_args()
 
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    # Importing src.utils configures logging at INFO; keep query commands
+    # quiet and show progress for ingestion.
+    logging.getLogger().setLevel(logging.INFO if args.command == "ingest" else logging.WARNING)
 
     if args.command == "ingest":
-        cmd_ingest(args)
+        cmd_ingest(args, p_ingest)
     elif args.command == "search":
         cmd_search(args)
     elif args.command == "analyze":
@@ -329,6 +451,8 @@ def main() -> None:
         cmd_extract_relationships(args)
     elif args.command == "stats":
         cmd_stats(args)
+    elif args.command == "reindex":
+        cmd_reindex(args)
     else:
         parser.print_help()
 

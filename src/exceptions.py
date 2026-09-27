@@ -34,13 +34,24 @@ class LexiconError(Exception):
 
     def to_dict(self) -> dict[str, Any]:
         """Convert exception to dictionary for API responses."""
-        result: dict[str, Any] = {
+        return {
             "error": self.code,
             "message": self.message,
+            "details": self.details,
         }
-        if self.details:
-            result["details"] = self.details
-        return result
+
+
+def _merge_overrides(
+    kwargs: dict[str, Any], message: str, details: dict[str, Any]
+) -> dict[str, Any]:
+    """Combine a subclass's derived message/details with the caller's kwargs.
+
+    A caller-supplied ``message`` wins and caller ``details`` are merged over
+    the derived ones, so subclasses never pass either keyword twice.
+    """
+    kwargs["message"] = kwargs.get("message") or message
+    kwargs["details"] = {**details, **(kwargs.get("details") or {})}
+    return kwargs
 
 
 # =============================================================================
@@ -67,7 +78,7 @@ class NotFoundError(LexiconError):
         details = {"resource_type": resource_type}
         if resource_id:
             details["resource_id"] = resource_id
-        super().__init__(message=message, details=details, **kwargs)
+        super().__init__(**_merge_overrides(kwargs, message, details))
 
 
 class LSRNotFoundError(NotFoundError):
@@ -102,7 +113,7 @@ class ValidationError(LexiconError):
         value: Any = None,
         **kwargs: Any,
     ):
-        details = kwargs.pop("details", {})
+        details = dict(kwargs.pop("details", None) or {})
         if field:
             details["field"] = field
         if value is not None:
@@ -129,7 +140,7 @@ class InvalidDateRangeError(ValidationError):
             details["start_date"] = start_date
         if end_date is not None:
             details["end_date"] = end_date
-        super().__init__(message=message, details=details, **kwargs)
+        super().__init__(**_merge_overrides(kwargs, message, details))
 
 
 class InvalidLanguageCodeError(ValidationError):
@@ -141,7 +152,8 @@ class InvalidLanguageCodeError(ValidationError):
         message = "Invalid language code format"
         if language_code:
             message = f"Invalid language code format: {language_code}"
-        super().__init__(message=message, field="language_code", value=language_code, **kwargs)
+        kwargs["message"] = kwargs.get("message") or message
+        super().__init__(field="language_code", value=language_code, **kwargs)
 
 
 class DuplicateError(LexiconError):
@@ -163,7 +175,7 @@ class DuplicateError(LexiconError):
         details = {"resource_type": resource_type}
         if identifier:
             details["identifier"] = identifier
-        super().__init__(message=message, details=details, **kwargs)
+        super().__init__(**_merge_overrides(kwargs, message, details))
 
 
 class RateLimitError(LexiconError):
@@ -178,7 +190,7 @@ class RateLimitError(LexiconError):
         retry_after: int | None = None,
         **kwargs: Any,
     ):
-        details = kwargs.pop("details", {})
+        details = dict(kwargs.pop("details", None) or {})
         if retry_after:
             details["retry_after_seconds"] = retry_after
         super().__init__(details=details, **kwargs)
@@ -233,7 +245,7 @@ class DatabaseConnectionError(DatabaseError):
         details = {}
         if database:
             details["database"] = database
-        super().__init__(message=message, details=details, **kwargs)
+        super().__init__(**_merge_overrides(kwargs, message, details))
 
 
 # Backward compatibility alias (deprecated - use DatabaseConnectionError)
@@ -256,7 +268,7 @@ class QueryError(DatabaseError):
         details = {}
         if query_type:
             details["query_type"] = query_type
-        super().__init__(message=message, details=details, **kwargs)
+        super().__init__(**_merge_overrides(kwargs, message, details))
 
 
 class TransactionError(DatabaseError):
@@ -297,7 +309,7 @@ class IngestionError(PipelineError):
             details["source"] = source
         if record_id:
             details["record_id"] = record_id
-        super().__init__(message=message, details=details, **kwargs)
+        super().__init__(**_merge_overrides(kwargs, message, details))
 
 
 class EntityResolutionError(PipelineError):
@@ -379,7 +391,7 @@ class InsufficientDataError(AnalysisError):
             details["minimum_required"] = minimum_required
         if actual is not None:
             details["actual"] = actual
-        super().__init__(message=message, details=details, **kwargs)
+        super().__init__(**_merge_overrides(kwargs, message, details))
 
 
 class AmbiguousResultError(AnalysisError):
@@ -412,4 +424,4 @@ class ConfigurationError(LexiconError):
         details = {}
         if setting:
             details["setting"] = setting
-        super().__init__(message=message, details=details, **kwargs)
+        super().__init__(**_merge_overrides(kwargs, message, details))

@@ -1,6 +1,7 @@
 """Unit tests for configuration management."""
 
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -23,7 +24,11 @@ class TestDatabaseConfig:
 
     def test_default_values(self):
         """Test default database configuration values."""
-        config = DatabaseConfig()
+        # DatabaseConfig reads NEO4J_URI etc. from the environment; clear them
+        db_keys = ("NEO4J_", "POSTGRES_", "REDIS_", "ELASTICSEARCH_")
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith(db_keys)}
+        with patch.dict(os.environ, clean_env, clear=True):
+            config = DatabaseConfig()
         assert config.neo4j_uri == "bolt://localhost:7687"
         assert config.postgres_host == "localhost"
         assert config.postgres_port == 5432
@@ -56,7 +61,7 @@ class TestAPIConfig:
     def test_default_values(self):
         """Test default API configuration values."""
         config = APIConfig()
-        assert config.api_host == "0.0.0.0"
+        assert config.api_host == "127.0.0.1"
         assert config.api_port == 8000
         assert config.cors_origins == "http://localhost:3000,http://localhost:8080"
 
@@ -124,9 +129,14 @@ class TestErrorTrackingConfig:
 
     def test_default_values(self):
         """Test default error tracking configuration values."""
-        config = ErrorTrackingConfig()
+        with patch.dict(os.environ):
+            os.environ.pop("APP_VERSION", None)
+            config = ErrorTrackingConfig()
         assert config.environment == "development"
-        assert config.app_version == "0.1.0"
+        # The version the API reports follows the VERSION file, which
+        # scripts/bump_version.py updates together with the code
+        version_file = Path(__file__).resolve().parents[2] / "VERSION"
+        assert config.app_version == version_file.read_text().strip()
         assert config.debug is False
 
     def test_sample_rate_validation_valid(self):

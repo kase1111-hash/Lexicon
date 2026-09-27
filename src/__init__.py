@@ -1,4 +1,4 @@
-"""Linguistic Stratigraphy - Automated Cross-Linguistic Lexical Evolution Graph."""
+"""Lexicon: date a text by its words, from a graph of dated word records."""
 
 __version__ = "0.1.0"
 
