@@ -14,8 +14,8 @@ hypothesis>=6.82
 # Code quality: exact versions, shared with CI (.github/workflows) and
 # .pre-commit-config.yaml so local runs and CI agree
 black==26.5.1
-ruff==0.16.9
-mypy==2.3.1
+ruff==0.16.10
+mypy==2.4.0
 pre-commit>=3.6
 
 # Security
